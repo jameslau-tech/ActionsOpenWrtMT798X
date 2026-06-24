@@ -28,7 +28,7 @@ git clone --depth=1 -b dev https://github.com/vernesong/OpenClash.git feeds/luci
 
 # Nikki / Momo
 #git clone --depth=1 https://github.com/nikkinikki-org/OpenWrt-nikki.git package/custom/nikki
-git clone --depth=1 https://github.com/nikkinikki-org/OpenWrt-momo.git package/custom/momo
+#git clone --depth=1 https://github.com/nikkinikki-org/OpenWrt-momo.git package/custom/momo
 
 # Daed
 #git clone --depth=1 -b kix https://github.com/QiuSimons/luci-app-daed.git package/custom/daed
@@ -73,8 +73,6 @@ git clone --depth=1 https://github.com/eamonxg/luci-app-aurora-config.git packag
 # change the default theme:
 #sed -i 's/+luci-theme-bootstrap/+luci-theme-argon/g; s/default Bootstrap theme/Argon theme/g' feeds/luci/collections/luci-light/Makefile
 sed -i 's/+luci-theme-bootstrap/+luci-theme-aurora/g; s/default Bootstrap theme/Aurora theme/g' feeds/luci/collections/luci-light/Makefile
-#修改默认主题
-#sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" $(find ./feeds/luci/collections/ -type f -name "Makefile")
 
 ./scripts/feeds install -a
 #git clone --depth=1 https://github.com/sirpdboy/luci-theme-kucat.git package/custom/luci-theme-kucat
