@@ -9,7 +9,6 @@ $ https://github.com/jameslau-tech/fanchmwrt
 src-git fanchmwrt https://github.com/fanchmwrt/fanchmwrt-packages.git
 
 https://github.com/he-yu-qing/2512immortalwrt-mt798x-rebase/tree/25.12
-https://github.com/zjuahhy/immortalwrt-mt798x-rebase/
 https://github.com/VIKINGYFY/CloseWRT-CI
 https://github.com/Yuzhii0718
 https://github.com/x-wrt
