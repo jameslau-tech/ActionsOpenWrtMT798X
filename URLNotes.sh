@@ -1,6 +1,8 @@
 #!/bin/bash
 
-$ https://github.com/Jameslau-tech/fanchmwrt
+https://github.com/LazuliKao/luci-theme-fluent
+
+$ https://github.com/jameslau-tech/fanchmwrt
 1) kernel patch: target/linux/generic/hack-6.12/950-fwx-nf-conn-struct-user-hook.patch
 2) new package：package/fcm
 3）new feed
