@@ -1,0 +1,514 @@
+name: 25.12-clx-s20p
+
+env:
+  DEVICE_NAME: 25.12-clx-s20p
+#  REPO_URL: https://github.com/chasey-dev/immortalwrt-mt798x-rebase
+  REPO_URL: https://github.com/jameslau-tech/immortalwrt-mt798x-rebase
+  REPO_BRANCH: 25.12
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: 25.12/mt7986-clx-s20p.config
+  DIY_P1_SH: 25.12/diy-part1.sh
+  DIY_P2_SH: 25.12/diy-part2.sh
+#  DIY_P3_SH: diy-partX.sh
+  UPLOAD_BIN_DIR: true
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+  TZ: Asia/Shanghai
+
+  # 强制 JavaScript Action 使用 Node.js 24，避免 Node 20 弃用警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      ssh:
+        description: 'SSH connection to Actions'
+        required: false
+        default: 'false'
+
+# =========================================================
+# 权限声明
+# 创建/上传/删除 Release、删除 workflow runs 必需
+# =========================================================
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    # =========================================================
+    # 1. 释放空间 + 初始化编译环境
+    # =========================================================
+    - name: Free disk space & init build environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        # 删除大型预装软件
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+          /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/lib/jvm
+        sudo docker image prune --all --force
+
+        # 配置 12GB Swap（Rust/LLVM 编译需要大量虚拟内存）
+        sudo swapoff -a && sudo rm -f /mnt/swapfile
+        sudo fallocate -l 12G /mnt/swapfile
+        sudo chmod 600 /mnt/swapfile
+        sudo mkswap /mnt/swapfile && sudo swapon /mnt/swapfile
+
+        # 系统更新
+        sudo -E apt-get -yqq purge firefox snapd
+        sudo -E apt-get -yqq update
+        sudo -E apt-get -yqq full-upgrade
+
+        # 安装 eBPF / daed 编译依赖
+        sudo -E apt-get -yqq install clang llvm dwarves build-essential \
+          libssl-dev libelf-dev bc flex bison python3 xz-utils tar \
+          dos2unix libfuse-dev
+
+        # 安装 ImmortalWrt 官方编译依赖
+        sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+
+        # 安装 pnpm（daed 前端构建需要）
+        sudo npm install -g pnpm
+
+        # 清理
+        sudo -E apt-get -yqq autoremove --purge
+        sudo -E apt-get -yqq clean
+        sudo -E timedatectl set-timezone "$TZ"
+
+        sudo mkdir -p /workdir
+        sudo chown "$USER":"$USER" /workdir
+
+        echo "磁盘空间:"
+        df -hT
+
+        echo "内存/Swap:"
+        free -h
+
+    # =========================================================
+    # 2. 克隆源码
+    # =========================================================
+    - name: Clone source code
+      working-directory: /workdir
+      run: |
+        df -hT "$PWD"
+        git clone "$REPO_URL" -b "$REPO_BRANCH" --single-branch --depth=1 openwrt
+        ln -sf /workdir/openwrt "$GITHUB_WORKSPACE/openwrt"
+
+    # =========================================================
+    # 3. 更新并安装 Feeds
+    # =========================================================
+    - name: Update & install feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    # =========================================================
+    # 4. 加载自定义 Feeds
+    # =========================================================
+    - name: Load custom feeds (diy-part1.sh)
+      run: |
+        [ -e "$FEEDS_CONF" ] && cp "$FEEDS_CONF" openwrt/feeds.conf.default
+        chmod +x "$DIY_P1_SH"
+        cd openwrt
+        "$GITHUB_WORKSPACE/$DIY_P1_SH"
+
+    # =========================================================
+    # 5. 加载自定义配置 (diy-part2.sh)
+    # =========================================================
+    - name: Load custom configuration (diy-part2.sh)
+      run: |
+        [ -e files ] && cp -r files openwrt/files
+        [ -e "$CONFIG_FILE" ] && cp "$CONFIG_FILE" openwrt/.config
+        chmod +x "$DIY_P2_SH"
+        cd openwrt
+        "$GITHUB_WORKSPACE/$DIY_P2_SH"
+
+    # =========================================================
+    # 5.5 加载自定义配置 (diy-part3.sh)
+    # =========================================================
+    - name: Load custom configuration (diy-part3.sh)
+      run: |
+        [ -e "$CONFIG_FILE" ] && cp "$CONFIG_FILE" openwrt/.config
+        chmod +x "$DIY_P3_SH"
+        cd openwrt
+        "$GITHUB_WORKSPACE/$DIY_P3_SH"
+
+    # =========================================================
+    # 5.6 生成 Toolchain 缓存 Key
+    # =========================================================
+    - name: Generate toolchain cache key
+      id: cache-key
+      run: |
+        cd openwrt
+        make defconfig 1>/dev/null 2>&1
+
+        # 提取目标平台
+        TARGET=$(grep '^CONFIG_TARGET_BOARD=' .config | cut -d'"' -f2)
+        SUBTARGET=$(grep '^CONFIG_TARGET_SUBTARGET=' .config | cut -d'"' -f2)
+
+        # 基于 tools/ 和 toolchain/ 源码生成 hash
+        TOOLS_HASH=$(find tools toolchain -type f \( -name "Makefile" -o -name "*.mk" \) \
+          -exec md5sum {} + 2>/dev/null | sort | md5sum | cut -d' ' -f1)
+
+        CACHE_KEY="toolchain-${TARGET}-${SUBTARGET}-${TOOLS_HASH:0:16}"
+        CACHE_PREFIX="toolchain-${TARGET}-${SUBTARGET}"
+
+        echo "CACHE_KEY=$CACHE_KEY" >> "$GITHUB_OUTPUT"
+        echo "CACHE_PREFIX=$CACHE_PREFIX" >> "$GITHUB_OUTPUT"
+
+        echo "========================================"
+        echo "🔑 缓存 Key: $CACHE_KEY"
+        echo "📌 缓存前缀: $CACHE_PREFIX"
+        echo "========================================"
+
+    # =========================================================
+    # 5.7 恢复 Toolchain —— 第一优先: actions/cache
+    # =========================================================
+    - name: Restore toolchain from actions/cache
+      uses: actions/cache/restore@v5
+      id: cache-restore
+      with:
+        path: |
+          /workdir/openwrt/staging_dir/host*
+          /workdir/openwrt/staging_dir/tool*
+        key: ${{ steps.cache-key.outputs.CACHE_KEY }}
+
+    # =========================================================
+    # 5.8 恢复 Toolchain —— 第二优先: Release 备份
+    # 精确匹配当前 CACHE_KEY.tzst，避免恢复旧工具链
+    # =========================================================
+    - name: Restore toolchain from Release backup
+      if: steps.cache-restore.outputs.cache-hit != 'true'
+      id: release-restore
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        cd openwrt
+
+        CACHE_KEY="${{ steps.cache-key.outputs.CACHE_KEY }}"
+        ASSET_NAME="${CACHE_KEY}.tzst"
+
+        if ! gh release view toolchain-cache --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          echo "restored=false" >> "$GITHUB_OUTPUT"
+          echo "⚠️ toolchain-cache Release 不存在，可能是首次运行"
+          exit 0
+        fi
+
+        if gh release view toolchain-cache \
+          --repo "$GITHUB_REPOSITORY" \
+          --json assets \
+          -q '.assets[].name' 2>/dev/null | grep -qx "$ASSET_NAME"; then
+
+          echo "📦 从 Release 下载工具链: $ASSET_NAME"
+          echo "📍 Release 仓库: $GITHUB_REPOSITORY"
+
+          gh release download toolchain-cache \
+            --repo "$GITHUB_REPOSITORY" \
+            -p "$ASSET_NAME" \
+            -D .
+
+          if [ -e "$ASSET_NAME" ]; then
+            echo "📂 解压工具链缓存..."
+            tar -I unzstd -xf "$ASSET_NAME" || tar -xf "$ASSET_NAME"
+            rm -f "$ASSET_NAME"
+
+            echo "restored=true" >> "$GITHUB_OUTPUT"
+            echo "✅ Release 备份恢复成功"
+          else
+            echo "restored=false" >> "$GITHUB_OUTPUT"
+            echo "❌ Release 下载失败，未找到文件: $ASSET_NAME"
+          fi
+        else
+          echo "restored=false" >> "$GITHUB_OUTPUT"
+          echo "⚠️ Release 中没有当前缓存文件: $ASSET_NAME"
+        fi
+
+    # =========================================================
+    # 5.9 处理 Toolchain
+    # - actions/cache 命中：跳过工具链编译，不保存缓存
+    # - Release 命中：跳过工具链编译，但重新写入 actions/cache
+    # - 全部未命中：编译工具链，同时保存 actions/cache 和 Release
+    # =========================================================
+    - name: Handle toolchain
+      id: toolchain
+      run: |
+        cd openwrt
+
+        CACHE_HIT="${{ steps.cache-restore.outputs.cache-hit }}"
+        RELEASE_HIT="${{ steps.release-restore.outputs.restored }}"
+
+        if [ "$CACHE_HIT" = "true" ]; then
+          echo "✅ actions/cache 命中，工具链已恢复"
+          echo "need_build=false" >> "$GITHUB_OUTPUT"
+          echo "need_save_cache=false" >> "$GITHUB_OUTPUT"
+          echo "need_save_release=false" >> "$GITHUB_OUTPUT"
+
+        elif [ "$RELEASE_HIT" = "true" ]; then
+          echo "✅ Release 工具链缓存命中"
+          echo "📌 将重新写入 actions/cache，加速下次构建"
+          echo "need_build=false" >> "$GITHUB_OUTPUT"
+          echo "need_save_cache=true" >> "$GITHUB_OUTPUT"
+          echo "need_save_release=false" >> "$GITHUB_OUTPUT"
+
+        else
+          echo "=========================================="
+          echo "⏳ 无可用缓存，开始编译工具链..."
+          echo "=========================================="
+
+          make tools/install -j"$(nproc)" || make tools/install -j1 V=s || {
+            echo "❌ tools 编译失败"
+            exit 1
+          }
+          echo "✅ tools 编译完成"
+
+          make toolchain/install -j"$(nproc)" || make toolchain/install -j1 V=s || {
+            echo "❌ toolchain 编译失败"
+            exit 1
+          }
+          echo "✅ toolchain 编译完成"
+
+          echo "need_build=true" >> "$GITHUB_OUTPUT"
+          echo "need_save_cache=true" >> "$GITHUB_OUTPUT"
+          echo "need_save_release=true" >> "$GITHUB_OUTPUT"
+        fi
+
+        # 修改 Makefile，确保后续 make 跳过工具链重编
+        sed -i 's/ $(tool.*\/stamp-compile)//' Makefile
+        echo "📌 Makefile 已修改，后续编译将跳过工具链"
+
+    # =========================================================
+    # 5.10 保存 Toolchain 到 actions/cache
+    # - 首次编译后保存
+    # - 从 Release 恢复后也保存
+    # =========================================================
+    - name: Save toolchain to actions/cache
+      uses: actions/cache/save@v5
+      if: steps.toolchain.outputs.need_save_cache == 'true'
+      with:
+        path: |
+          /workdir/openwrt/staging_dir/host*
+          /workdir/openwrt/staging_dir/tool*
+        key: ${{ steps.cache-key.outputs.CACHE_KEY }}
+
+    # =========================================================
+    # 5.11 保存 Toolchain 到 Release 备份
+    # 仅首次编译工具链时执行
+    # =========================================================
+    - name: Save toolchain to Release backup
+      if: steps.toolchain.outputs.need_save_release == 'true'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        cd openwrt
+
+        CACHE_KEY="${{ steps.cache-key.outputs.CACHE_KEY }}"
+        CACHE_PREFIX="${{ steps.cache-key.outputs.CACHE_PREFIX }}"
+
+        echo "📦 打包工具链..."
+        tar -I zstdmt -cf "${CACHE_KEY}.tzst" staging_dir/host* staging_dir/tool*
+        ls -lh "${CACHE_KEY}.tzst"
+
+        echo "📍 Release 目标仓库: $GITHUB_REPOSITORY"
+
+        if ! gh release view toolchain-cache --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          echo "📝 创建 toolchain-cache Release..."
+          gh release create toolchain-cache \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Toolchain Cache" \
+            --notes "自动生成的工具链缓存，请勿手动删除" \
+            --latest=false
+        fi
+
+        # 删除同平台旧缓存，避免 Release 越积越多
+        gh release view toolchain-cache \
+          --repo "$GITHUB_REPOSITORY" \
+          --json assets \
+          -q '.assets[].name' 2>/dev/null | \
+          grep "^${CACHE_PREFIX}" | while read -r old_file; do
+            echo "🗑️ 删除旧缓存: $old_file"
+            gh release delete-asset toolchain-cache "$old_file" \
+              --repo "$GITHUB_REPOSITORY" \
+              -y 2>/dev/null || true
+          done
+
+        echo "📤 上传到 Release..."
+        gh release upload toolchain-cache "${CACHE_KEY}.tzst" \
+          --repo "$GITHUB_REPOSITORY" \
+          --clobber
+
+        rm -f "${CACHE_KEY}.tzst"
+        echo "✅ 工具链已备份到 Release"
+
+    # =========================================================
+    # 6. SSH 调试（可选）
+    # =========================================================
+    - name: SSH connection to Actions
+      uses: mxschmitt/action-tmate@v3
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
+
+    # =========================================================
+    # 7. 下载软件包
+    # =========================================================
+    - name: Download packages
+      id: package
+      run: |
+        cd openwrt
+        make defconfig
+        make download -j8 || make download -j1 V=s
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    # =========================================================
+    # 8. 编译固件
+    # =========================================================
+    - name: Compile the firmware
+      id: compile
+      run: |
+        cd openwrt
+
+        echo "开始编译... ($(nproc) 线程)"
+        df -hT /
+
+        if make -j"$(nproc)"; then
+          echo "多线程编译成功"
+        elif make -j1; then
+          echo "单线程编译成功"
+        elif make -j1 V=s; then
+          echo "单线程详细日志编译成功"
+        else
+          echo "编译失败"
+          exit 1
+        fi
+
+        echo "========================================"
+        echo "固件编译完成"
+        echo "最终磁盘空间:"
+        df -hT /
+        echo "========================================"
+
+        echo "status=success" >> "$GITHUB_OUTPUT"
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> "$GITHUB_ENV"
+
+    # =========================================================
+    # 8.5 空间检查
+    # =========================================================
+    - name: Check space usage
+      if: (!cancelled())
+      run: df -hT
+
+    # =========================================================
+    # 9. 上传 bin 目录（Artifacts）
+    # =========================================================
+    - name: Upload bin directory
+      uses: actions/upload-artifact@v5
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      with:
+        name: OpenWrt_bin_${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: openwrt/bin
+
+    # =========================================================
+    # 10. 整理固件文件
+    # =========================================================
+    - name: Organize files
+      id: organize
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      run: |
+        cd openwrt/bin/targets/*/*
+        rm -rf packages
+        echo "FIRMWARE=$PWD" >> "$GITHUB_ENV"
+        echo "status=success" >> "$GITHUB_OUTPUT"
+
+    - name: Upload firmware directory
+      uses: actions/upload-artifact@v5
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      with:
+        name: OpenWrt_firmware_${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}
+
+    # =========================================================
+    # 11. 生成发布标签和日志
+    # =========================================================
+    - name: Generate release tag
+      id: tag
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      run: |
+        AUTHOR=$(echo "${{ env.REPO_URL }}" | cut -d'/' -f4)
+        DEVICE_NAME="${{ env.DEVICE_NAME }}"
+        BRANCH="${{ env.REPO_BRANCH }}"
+        BUILD_TIME=$(date +"%Y%m%d-%H%M")
+
+        RELEASE_TAG="${DEVICE_NAME}-${AUTHOR}-${BRANCH}-${BUILD_TIME}"
+        RELEASE_TAG=$(echo "$RELEASE_TAG" | sed 's/[^a-zA-Z0-9._-]/-/g')
+
+        echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+
+        touch release.txt
+        echo "## 🚀 OpenWrt 自动编译固件" >> release.txt
+        echo "" >> release.txt
+        echo "### 📋 编译信息" >> release.txt
+        echo "| 项目 | 详情 |" >> release.txt
+        echo "|------|------|" >> release.txt
+        echo "| 📱 设备名称 | \`${DEVICE_NAME}\` |" >> release.txt
+        echo "| 👤 源码作者 | \`${AUTHOR}\` |" >> release.txt
+        echo "| 🔗 源码仓库 | ${{ env.REPO_URL }} |" >> release.txt
+        echo "| 🌿 分支版本 | \`${BRANCH}\` |" >> release.txt
+        echo "| ⏰ 编译时间 | $(date '+%Y-%m-%d %H:%M:%S') (Shanghai) |" >> release.txt
+        echo "| 🏷️ 版本标签 | \`${RELEASE_TAG}\` |" >> release.txt
+        echo "" >> release.txt
+        echo "---" >> release.txt
+        echo "> ⚠️ **注意**: 请根据自己的机型选择对应的 Factory 或 Sysupgrade 固件" >> release.txt
+
+        echo "status=success" >> "$GITHUB_OUTPUT"
+
+    # =========================================================
+    # 12. 发布到 GitHub Release
+    # =========================================================
+    - name: Upload firmware to release
+      uses: softprops/action-gh-release@v2.3.2
+      if: steps.tag.outputs.status == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
+        files: |
+          ${{ env.FIRMWARE }}/*.bin
+          ${{ env.FIRMWARE }}/*.ipk
+          ${{ env.FIRMWARE }}/*.img.gz
+          ${{ env.FIRMWARE }}/*.manifest
+          ${{ env.FIRMWARE }}/*.tar.gz
+
+    # =========================================================
+    # 13. 清理旧的工作流记录
+    # =========================================================
+    - name: Delete workflow runs
+      uses: Mattraks/delete-workflow-runs@v2
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        retain_days: 1
+        keep_minimum_runs: 10
+
+    # =========================================================
+    # 14. 清理旧的 Release 发布
+    # delete_tag_pattern 只删本设备固件 Release
+    # 不会误删 toolchain-cache
+    # =========================================================
+    - name: Remove old releases
+      uses: dev-drprasad/delete-older-releases@v0.3.4
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      with:
+        keep_latest: 10
+        delete_tags: true
+        delete_tag_pattern: '^${{ env.DEVICE_NAME }}-'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
