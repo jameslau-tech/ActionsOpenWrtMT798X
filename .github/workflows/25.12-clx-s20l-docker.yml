@@ -8,6 +8,7 @@ env:
   CONFIG_FILE: 25.12/mt7986-clx-s20l-docker.config
   DIY_P1_SH: 25.12/diy-part1.sh
   DIY_P2_SH: 25.12/diy-part2.sh
+  DIY_P3_SH: diy-partX.sh
   UPLOAD_BIN_DIR: true
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
