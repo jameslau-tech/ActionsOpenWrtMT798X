@@ -46,7 +46,7 @@ git clone --depth=1 https://github.com/sbwml/luci-app-openlist2.git package/cust
 
 #git clone --depth=1 https://github.com/sirpdboy/luci-app-watchdog.git package/custom/watchdog
 #git clone --depth=1 https://github.com/sirpdboy/luci-app-taskplan.git package/custom/taskplan
-#git clone --depth=1 https://github.com/iv7777/luci-app-authshield.git package/custom/authshield
+git clone --depth=1 https://github.com/iv7777/luci-app-authshield.git package/custom/authshield
 #git clone --depth=1 https://github.com/destan19/OpenAppFilter.git package/custom/OpenAppFilter
 #git clone --depth=1 https://github.com/janvanstiphout/luci-app-accesscontrol.git package/custom/accesscontrol
 
