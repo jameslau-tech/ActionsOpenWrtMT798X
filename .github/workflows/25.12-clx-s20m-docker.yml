@@ -143,6 +143,99 @@ jobs:
         chmod +x "$DIY_P3_SH"
         cd openwrt
         "$GITHUB_WORKSPACE/$DIY_P3_SH"
+    
+    # =========================================================
+    # 5.55 USB 自动挂载到 /opt (Docker data-root)
+    # =========================================================
+    - name: USB auto-mount to /opt (Docker data-root)
+      run: |
+        cd openwrt
+        mkdir -p files/usr/bin files/etc/hotplug.d/block files/etc/uci-defaults
+    
+        # ---- 1) 挂载/卸载辅助脚本 ----
+        cat > files/usr/bin/mount-opt <<'EOF'
+        #!/bin/sh
+        # 将第一个未挂载的 USB/SD 分区挂载到 /opt
+        MOUNT_POINT="/opt"
+    
+        do_mount() {
+          local dev
+          mkdir -p "$MOUNT_POINT"
+          # /opt 已被占用则不重复挂
+          grep -qs " ${MOUNT_POINT} " /proc/mounts && return 0
+          for dev in /dev/sd[a-z][0-9]* /dev/mmcblk[0-9]p[0-9]*; do
+            [ -b "$dev" ] || continue
+            grep -qs "^${dev} " /proc/mounts && continue
+            logger -t mount-opt "mounting ${dev} -> ${MOUNT_POINT}"
+            mount -o rw,noatime "$dev" "$MOUNT_POINT" && return 0
+          done
+          return 1
+        }
+    
+        do_umount() {
+          local dev="${1}"
+          grep -qs "^${dev} ${MOUNT_POINT} " /proc/mounts && umount "$MOUNT_POINT"
+        }
+    
+        case "$1" in
+          mount)  do_mount ;;
+          umount) do_umount "$2" ;;
+          *) echo "usage: $0 mount|umount [dev]" ;;
+        esac
+        EOF
+        chmod +x files/usr/bin/mount-opt
+    
+        # ---- 2) hotplug: 开机冷插拔 + 运行期热插拔 ----
+        cat > files/etc/hotplug.d/block/40-mount-opt <<'EOF'
+        case "$ACTION" in
+          add)
+            case "$DEVNAME" in
+              sd[a-z][0-9]*|mmcblk[0-9]p[0-9]*)
+                # 后台执行避免阻塞 hotplug 队列; 等 1s 让设备节点就绪
+                ( sleep 1; /usr/bin/mount-opt mount ) &
+                ;;
+            esac
+            ;;
+          remove)
+            case "$DEVNAME" in
+              sd[a-z][0-9]*|mmcblk[0-9]p[0-9]*)
+                /usr/bin/mount-opt umount "/dev/$DEVNAME"
+                ;;
+            esac
+            ;;
+        esac
+        EOF
+    
+        # ---- 3) 首次开机: 禁用 blockd, 并提前完成挂载 ----
+        cat > files/etc/uci-defaults/99-mount-opt <<'EOF'
+        # blockd 会把 U 盘自动挂到 /mnt/sda1, 与 /opt 冲突, 禁用之
+        [ -x /etc/init.d/blockd ] && /etc/init.d/blockd disable
+        mkdir -p /opt
+    
+        # S10 时 kmodloader 已加载 usb-storage, 稍等设备枚举后挂载
+        (
+          n=0
+          while [ "$n" -lt 10 ] && ! /usr/bin/mount-opt mount; do
+            sleep 1
+            n=$((n+1))
+          done
+        ) &
+        exit 0
+        EOF
+        chmod +x files/etc/uci-defaults/99-mount-opt
+    
+        # ---- 4) (可选) Docker 数据根目录指向 /opt ----
+        # 设备名是 clx-s20mdocker, 若 .config 启用了 docker 建议加上
+        mkdir -p files/etc/docker
+        cat > files/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/opt/docker"
+        }
+        EOF
+    
+        echo "USB auto-mount overlay generated:"
+        find files/usr/bin/mount-opt files/etc/hotplug.d/block/40-mount-opt files/etc/uci-defaults/99-mount-opt
+
 
     # =========================================================
     # 5.6 生成 Toolchain 缓存 Key
