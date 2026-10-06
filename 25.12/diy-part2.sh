@@ -87,35 +87,6 @@ else
   fi
 fi
 
-MAKEFILE="feeds/packages/utils/dockerd/Makefile"
-   if [ ! -f "$MAKEFILE" ]; then
-       echo "ERROR: dockerd Makefile not found: $MAKEFILE"; exit 1
-   fi
-          echo "========== DEPENDS (before) =========="
-          sed -n '/define Package\/dockerd$/,/^endef/p' "$MAKEFILE"
-
-          # 1) 整行删除（覆盖 +IPV6: 条件前缀、iptables 全部变体、续行反斜杠）
-          sed -i -E \
-            -e '/^[[:space:]]*\+(IPV6:)?(iptables|ip6tables|iptables-mod-[a-z0-9-]+|ip6tables-mod-[a-z0-9-]+|kmod-ipt-[a-z0-9-]+)[[:space:]]*\\?[[:space:]]*$/d' \
-            "$MAKEFILE"
-          # 2) 兜底：同一行混排多个依赖时逐个剔除
-          sed -i -E \
-            -e 's/\+(IPV6:)?(iptables|ip6tables|iptables-mod-[a-z0-9-]+|ip6tables-mod-[a-z0-9-]+|kmod-ipt-[a-z0-9-]+)([[:space:]]+|$)/ /g' \
-            "$MAKEFILE"
-
-          echo "========== DEPENDS (after) =========="
-          sed -n '/define Package\/dockerd$/,/^endef/p' "$MAKEFILE"
-
-          # 3) 双向校验：iptables 系依赖清零，必要依赖未被误删
-          if grep -Eq '\+(IPV6:)?(iptables|ip6tables|kmod-ipt-)' "$MAKEFILE"; then
-            echo "ERROR: iptables dependencies still present"; exit 1
-          fi
-          for dep in containerd kmod-veth tini uci-firewall kmod-nf-ipvs; do
-            grep -q "+${dep}" "$MAKEFILE" \
-              || { echo "ERROR: ${dep} was accidentally removed"; exit 1; }
-          done
-echo "dockerd iptables dependencies removed OK."
-
 mkdir -p files/etc/sysctl.d
 cat > files/etc/sysctl.d/99-mt7986a-optimize.conf << 'SYSCTL'
 # --- 1. 队列与拥塞控制 (低延迟核心) ---
