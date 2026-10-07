@@ -202,6 +202,12 @@ jobs:
           "ip6tables": false,
           "firewall-backend": "nftables",
           "data-root": "/opt/docker",
+          "log-driver": "local",
+          "log-opts": {
+            "max-size": "10m",
+            "max-file": "3",
+            "compress": "true"
+          },
           "registry-mirrors": [
             "https://docker.1ms.run",
             "https://docker.xuanyuan.me",
@@ -217,6 +223,12 @@ jobs:
           "iptables": false,
           "ip6tables": false,
           "data-root": "/opt/docker",
+          "log-driver": "local",
+          "log-opts": {
+            "max-size": "10m",
+            "max-file": "3",
+            "compress": "true"
+          },
           "registry-mirrors": [
             "https://docker.1ms.run",
             "https://docker.xuanyuan.me",
