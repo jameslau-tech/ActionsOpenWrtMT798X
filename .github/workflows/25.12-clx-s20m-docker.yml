@@ -258,89 +258,118 @@ jobs:
         echo "daemon.json + uci-defaults generated."
     
     # =========================================================
-    # 5.57 USB auto-mount to /opt (Docker data-root)
+    # 5.57 eMMC p6 常驻挂载 /opt + USB 挂载到 /opt/usb/<dev>（排除 p5）
     # =========================================================
-    - name: Generate USB auto-mount overlay (/opt)
+    - name: Generate mount overlay (p6 -> /opt, USB -> /opt/usb/*)
       run: |
         cd openwrt
         set -euo pipefail
         mkdir -p files/usr/bin files/etc/hotplug.d/block files/etc/uci-defaults
     
-        # ---- 1) 挂载/卸载辅助脚本 ----
+        # ---- 1) mount-opt: p6 -> /opt 常驻; USB -> /opt/usb/sdX1 ----
         cat > files/usr/bin/mount-opt <<'EOF'
         #!/bin/sh
-        # 将第一个未挂载的 USB/SD 分区挂载到 /opt
-        MOUNT_POINT="/opt"
+        # 只允许: mmcblk0p6 -> /opt, sdXN -> /opt/usb/sdXN
+        # 明确排除 mmcblk0p5(rootfs/rom+overlay) 及 p1~p4 引导分区
+        ROOT_PART="mmcblk0p6"
+        OPT="/opt"
     
-        do_mount() {
-          local dev
-          mkdir -p "$MOUNT_POINT"
-          # /opt 已被占用则不重复挂
-          grep -qs " ${MOUNT_POINT} " /proc/mounts && return 0
-          for dev in /dev/sd[a-z][0-9]* /dev/mmcblk[0-9]p[0-9]*; do
-            [ -b "$dev" ] || continue
-            grep -qs "^${dev} " /proc/mounts && continue
-            logger -t mount-opt "mounting ${dev} -> ${MOUNT_POINT}"
-            mount -o rw,noatime "$dev" "$MOUNT_POINT" && return 0
-          done
-          return 1
+        mount_opt_root() {
+            mkdir -p "$OPT"
+            grep -qs " ${OPT} " /proc/mounts && return 0
+            [ -b "/dev/${ROOT_PART}" ] || return 1
+            mount -o rw,noatime "/dev/${ROOT_PART}" "$OPT" 2>/dev/null \
+                && logger -t mount-opt "mounted /dev/${ROOT_PART} -> ${OPT}"
         }
     
-        do_umount() {
-          local dev="${1}"
-          grep -qs "^${dev} ${MOUNT_POINT} " /proc/mounts && umount "$MOUNT_POINT"
+        mount_usb() {
+            local dev="${1##*/}" mnt
+            case "$dev" in sd[a-z][0-9]*) ;; *) return 1 ;; esac
+            mount_opt_root                  # 先保证 /opt 已被 p6 挂载
+            mnt="${OPT}/usb/${dev}"
+            mkdir -p "$mnt"
+            grep -qs " ${mnt} " /proc/mounts && return 0
+            mount -o rw,noatime "/dev/${dev}" "$mnt" \
+                && logger -t mount-opt "mounted /dev/${dev} -> ${mnt}"
+        }
+    
+        umount_usb() {
+            local dev="${1##*/}" mnt="${OPT}/usb/${1##*/}"
+            grep -qs " ${mnt} " /proc/mounts && umount "$mnt" \
+                && logger -t mount-opt "umounted ${mnt}"
         }
     
         case "$1" in
-          mount)  do_mount ;;
-          umount) do_umount "$2" ;;
-          *) echo "usage: $0 mount|umount [dev]" ;;
+            mount-root) mount_opt_root ;;
+            mount)      mount_usb "$2" ;;
+            umount)     umount_usb "$2" ;;
+            *) echo "usage: $0 mount-root|mount|umount [dev]" ;;
         esac
         EOF
         chmod +x files/usr/bin/mount-opt
     
-        # ---- 2) hotplug: 开机冷插拔 + 运行期热插拔 ----
+        # ---- 2) hotplug: 只响应 U 盘事件, 彻底不再触碰 mmcblk ----
         cat > files/etc/hotplug.d/block/40-mount-opt <<'EOF'
         case "$ACTION" in
-          add)
-            case "$DEVNAME" in
-              sd[a-z][0-9]*|mmcblk[0-9]p[0-9]*)
-                # 后台执行避免阻塞 hotplug 队列; 等 1s 让设备节点就绪
-                ( sleep 1; /usr/bin/mount-opt mount ) &
+            add)
+                case "$DEVNAME" in
+                    sd[a-z][0-9]*)
+                        ( sleep 1; /usr/bin/mount-opt mount "/dev/$DEVNAME" ) &
+                        ;;
+                esac
                 ;;
-            esac
-            ;;
-          remove)
-            case "$DEVNAME" in
-              sd[a-z][0-9]*|mmcblk[0-9]p[0-9]*)
-                /usr/bin/mount-opt umount "/dev/$DEVNAME"
+            remove)
+                case "$DEVNAME" in
+                    sd[a-z][0-9]*)
+                        /usr/bin/mount-opt umount "/dev/$DEVNAME"
+                        ;;
+                esac
                 ;;
-            esac
-            ;;
         esac
         EOF
     
-        # ---- 3) 首次开机: 禁用 blockd, 并提前完成挂载 ----
+        # ---- 3) 首次开机: 禁 blockd, 兜底挂 p6 -> /opt ----
         cat > files/etc/uci-defaults/99-mount-opt <<'EOF'
-        # blockd 会把 U 盘自动挂到 /mnt/sda1, 与 /opt 冲突, 禁用之
+        #!/bin/sh
+        # blockd 会把 U 盘挂到 /mnt/sda1 并可能乱挂 eMMC 分区, 禁用
         [ -x /etc/init.d/blockd ] && /etc/init.d/blockd disable
         mkdir -p /opt
-    
-        # S10 时 kmodloader 已加载 usb-storage, 稍等设备枚举后挂载
-        (
-          n=0
-          while [ "$n" -lt 10 ] && ! /usr/bin/mount-opt mount; do
-            sleep 1
-            n=$((n+1))
+        ( n=0
+          while [ "$n" -lt 10 ] && [ ! -b /dev/mmcblk0p6 ]; do
+              sleep 1; n=$((n+1))
           done
+          /usr/bin/mount-opt mount-root
         ) &
         exit 0
         EOF
         chmod +x files/etc/uci-defaults/99-mount-opt
     
-        echo "USB auto-mount overlay generated."
-        find files/usr/bin/mount-opt files/etc/hotplug.d/block/40-mount-opt files/etc/uci-defaults/99-mount-opt
+        # ---- 4) 压制源码可能预置的 p5 -> /opt 挂载项 + 显式声明 p6 ----
+        cat > files/etc/uci-defaults/98-fix-fstab <<'EOF'
+        #!/bin/sh
+        touch /etc/config/fstab
+        for s in $(uci -q show fstab | sed -n 's/^fstab\.\([^.]*\)\.device=.*/\1/p'); do
+            case "$(uci -q get fstab.$s.device)" in
+                *mmcblk0p5*) uci -q delete fstab.$s ;;
+            esac
+        done
+        uci -q get fstab.optroot >/dev/null || {
+            uci -q set fstab.optroot=mount
+            uci -q set fstab.optroot.target='/opt'
+            uci -q set fstab.optroot.device='/dev/mmcblk0p6'
+            uci -q set fstab.optroot.fstype='ext4'
+            uci -q set fstab.optroot.options='rw,noatime'
+            uci -q set fstab.optroot.enabled='1'
+        }
+        uci -q commit fstab
+        exit 0
+        EOF
+        chmod +x files/etc/uci-defaults/98-fix-fstab
     
+        echo "mount overlay generated."
+        find files/usr/bin/mount-opt files/etc/hotplug.d/block/40-mount-opt files/etc/uci-defaults/98-fix-fstab files/etc/uci-defaults/99-mount-opt
+    
+        
     # =========================================================
     # 5.58 (可选) dockerd 启动前等待 /opt 挂载
     # =========================================================
@@ -359,7 +388,7 @@ jobs:
         \tlocal n=0
         \twhile [ "$n" -lt 15 ]; do
         \t\tgrep -qs " /opt " /proc/mounts && break
-        \t\tls /dev/sd*[0-9] >/dev/null 2>&1 || break
+        \t\tls /dev/sd*[0-9] >/dev/null 2>&1 || [ -b /dev/mmcblk0p6 ] || break
         \t\tsleep 1
         \t\tn=$((n+1))
         \tdone
