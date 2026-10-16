@@ -2,8 +2,7 @@ name: 25.12-clx-s20l-docker
 
 env:
   DEVICE_NAME: 25.12-clx-s20l
-#  REPO_URL: https://github.com/chasey-dev/immortalwrt-mt798x-rebase
-  REPO_URL: https://github.com/jameslau-tech/immortalwrt-mt798x-rebase
+  REPO_URL: https://github.com/chasey-dev/immortalwrt-mt798x-rebase
   REPO_BRANCH: 25.12
   FEEDS_CONF: feeds.conf.default
 #  CONFIG_FILE: 25.12/mt7986-clx-s20l-docker.config
