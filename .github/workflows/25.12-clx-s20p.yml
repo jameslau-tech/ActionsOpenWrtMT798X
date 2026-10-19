@@ -1,11 +1,13 @@
-name: 25.12-clx-s20p
+name: 25.12-clx-s20p-docker
 
 env:
   DEVICE_NAME: 25.12-clx-s20p
   REPO_URL: https://github.com/chasey-dev/immortalwrt-mt798x-rebase
+#  REPO_URL: https://github.com/jameslau-tech/immortalwrt-mt798x-rebase
   REPO_BRANCH: 25.12
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: 25.12/mt7986-clx-s20p.config
+  #CONFIG_FILE: 25.12/s20mc.config
   DIY_P1_SH: 25.12/diy-part1.sh
   DIY_P2_SH: 25.12/diy-part2.sh
   DIY_P3_SH: diy-partX.sh
@@ -141,6 +143,275 @@ jobs:
         cd openwrt
         "$GITHUB_WORKSPACE/$DIY_P3_SH"
 
+    # =========================================================
+    # 5.55 Patch dockerd: drop legacy iptables dependencies
+    # =========================================================
+    - name: Remove legacy iptables dependencies from dockerd
+      run: |
+        cd openwrt
+        set -euo pipefail
+        MAKEFILE="feeds/packages/utils/dockerd/Makefile"
+        if [ ! -f "$MAKEFILE" ]; then
+          echo "ERROR: dockerd Makefile not found: $MAKEFILE"; exit 1
+        fi
+        echo "========== DEPENDS (before) =========="
+        sed -n '/define Package\/dockerd$/,/^endef/p' "$MAKEFILE"
+    
+        # 1) 整行删除（覆盖 +IPV6: 条件前缀、iptables 全部变体、续行反斜杠）
+        sed -i -E \
+          -e '/^[[:space:]]*\+(IPV6:)?(iptables|ip6tables|iptables-mod-[a-z0-9-]+|ip6tables-mod-[a-z0-9-]+|kmod-ipt-[a-z0-9-]+)[[:space:]]*\\?[[:space:]]*$/d' \
+          "$MAKEFILE"
+    
+        # 2) 兜底：同一行混排多个依赖时逐个剔除
+        sed -i -E \
+          -e 's/\+(IPV6:)?(iptables|ip6tables|iptables-mod-[a-z0-9-]+|ip6tables-mod-[a-z0-9-]+|kmod-ipt-[a-z0-9-]+)([[:space:]]+|$)/ /g' \
+          "$MAKEFILE"
+    
+        echo "========== DEPENDS (after) =========="
+        sed -n '/define Package\/dockerd$/,/^endef/p' "$MAKEFILE"
+    
+        # 3) 双向校验：iptables 系依赖清零，必要依赖未被误删
+        if grep -Eq '\+(IPV6:)?(iptables|ip6tables|kmod-ipt-)' "$MAKEFILE"; then
+          echo "ERROR: iptables dependencies still present"; exit 1
+        fi
+        for dep in containerd kmod-veth tini uci-firewall kmod-nf-ipvs; do
+          grep -q "+${dep}" "$MAKEFILE" \
+            || { echo "ERROR: ${dep} was accidentally removed"; exit 1; }
+        done
+        echo "dockerd iptables dependencies removed OK."
+    
+    # =========================================================
+    # 5.56 dockerd native nftables-only configuration (files overlay)
+    # =========================================================
+    - name: Generate dockerd nftables-only daemon config
+      run: |
+        cd openwrt
+        set -euo pipefail
+        mkdir -p files/etc/docker files/etc/uci-defaults
+    
+        # dockerd >=29 支持 firewall-backend=nftables
+        # dockerd <29 不支持该 key（会被拒启），降级为仅 iptables:false + fw4 NAT
+        # ImmortalWrt 25.12 的 packages feed 当前是 27.x，会走 else 分支；
+        # 保留分支判断是为了未来 feed 升级到 29 后无需再改 workflow
+        if grep -Eq '^PKG_VERSION:=(2[9-9]|[3-9][0-9])\.' \
+             feeds/packages/utils/dockerd/Makefile; then
+          cat > files/etc/docker/daemon.json <<'EOF'
+        {
+          "iptables": false,
+          "ip6tables": false,
+          "firewall-backend": "nftables",
+          "data-root": "/opt/docker",
+          "log-driver": "local",
+          "log-opts": {
+            "max-size": "10m",
+            "max-file": "3",
+            "compress": "true"
+          },
+          "registry-mirrors": [
+            "https://docker.1ms.run",
+            "https://docker.xuanyuan.me",
+            "https://docker.m.daocloud.io",
+            "https://docker.1panel.live",
+            "https://dockerproxy.net"
+          ]
+        }
+        EOF
+        else
+          cat > files/etc/docker/daemon.json <<'EOF'
+        {
+          "iptables": false,
+          "ip6tables": false,
+          "data-root": "/opt/docker",
+          "log-driver": "local",
+          "log-opts": {
+            "max-size": "10m",
+            "max-file": "3",
+            "compress": "true"
+          },
+          "registry-mirrors": [
+            "https://docker.1ms.run",
+            "https://docker.xuanyuan.me",
+            "https://docker.m.daocloud.io",
+            "https://docker.1panel.live",
+            "https://dockerproxy.net"
+          ]
+        }
+        EOF
+        fi
+        cat files/etc/docker/daemon.json
+    
+        # dockerd.init 的 process_config 读到 alt_config_file 后会软链过去
+        # 并跳过 UCI 配置生成与 iptables_add_blocking_rule
+        cat > files/etc/uci-defaults/99-dockerd-nftables <<'EOF'
+        #!/bin/sh
+        [ -f /etc/config/dockerd ] || touch /etc/config/dockerd
+        uci -q get dockerd.globals >/dev/null || uci -q set dockerd.globals=globals
+        uci -q set dockerd.globals.alt_config_file='/etc/docker/daemon.json'
+        uci -q set dockerd.globals.iptables='0'
+        uci -q set dockerd.globals.ip6tables='0'
+        uci -q commit dockerd
+    
+        # iptables=false 时 dockerd 不做 NAT，由 fw4 的 docker zone 负责
+        if ! uci -q get firewall.docker >/dev/null; then
+          uci -q add firewall zone >/dev/null
+          uci -q rename firewall.@zone[-1]='docker'
+          uci -q set firewall.docker.name='docker'
+          uci -q set firewall.docker.input='ACCEPT'
+          uci -q set firewall.docker.output='ACCEPT'
+          uci -q set firewall.docker.forward='ACCEPT'
+          uci -q set firewall.docker.masq='1'
+          uci -q add_list firewall.docker.network='docker'
+          uci -q commit firewall
+        fi
+        exit 0
+        EOF
+        chmod +x files/etc/uci-defaults/99-dockerd-nftables
+        echo "daemon.json + uci-defaults generated."
+    
+    # =========================================================
+    # 5.57 eMMC p6 常驻挂载 /opt + USB 挂载到 /opt/usb/<dev>（排除 p5）
+    # =========================================================
+    - name: Generate mount overlay (p6 -> /opt, USB -> /opt/usb/*)
+      run: |
+        cd openwrt
+        set -euo pipefail
+        mkdir -p files/usr/bin files/etc/hotplug.d/block files/etc/uci-defaults
+    
+        # ---- 1) mount-opt: p6 -> /opt 常驻; USB -> /opt/usb/sdX1 ----
+        cat > files/usr/bin/mount-opt <<'EOF'
+        #!/bin/sh
+        # 只允许: mmcblk0p6 -> /opt, sdXN -> /opt/usb/sdXN
+        # 明确排除 mmcblk0p5(rootfs/rom+overlay) 及 p1~p4 引导分区
+        ROOT_PART="mmcblk0p6"
+        OPT="/opt"
+    
+        mount_opt_root() {
+            mkdir -p "$OPT"
+            grep -qs " ${OPT} " /proc/mounts && return 0
+            [ -b "/dev/${ROOT_PART}" ] || return 1
+            mount -o rw,noatime "/dev/${ROOT_PART}" "$OPT" 2>/dev/null \
+                && logger -t mount-opt "mounted /dev/${ROOT_PART} -> ${OPT}"
+        }
+    
+        mount_usb() {
+            local dev="${1##*/}" mnt
+            case "$dev" in sd[a-z][0-9]*) ;; *) return 1 ;; esac
+            mount_opt_root                  # 先保证 /opt 已被 p6 挂载
+            mnt="${OPT}/usb/${dev}"
+            mkdir -p "$mnt"
+            grep -qs " ${mnt} " /proc/mounts && return 0
+            mount -o rw,noatime "/dev/${dev}" "$mnt" \
+                && logger -t mount-opt "mounted /dev/${dev} -> ${mnt}"
+        }
+    
+        umount_usb() {
+            local dev="${1##*/}" mnt="${OPT}/usb/${1##*/}"
+            grep -qs " ${mnt} " /proc/mounts && umount "$mnt" \
+                && logger -t mount-opt "umounted ${mnt}"
+        }
+    
+        case "$1" in
+            mount-root) mount_opt_root ;;
+            mount)      mount_usb "$2" ;;
+            umount)     umount_usb "$2" ;;
+            *) echo "usage: $0 mount-root|mount|umount [dev]" ;;
+        esac
+        EOF
+        chmod +x files/usr/bin/mount-opt
+    
+        # ---- 2) hotplug: 只响应 U 盘事件, 彻底不再触碰 mmcblk ----
+        cat > files/etc/hotplug.d/block/40-mount-opt <<'EOF'
+        case "$ACTION" in
+            add)
+                case "$DEVNAME" in
+                    sd[a-z][0-9]*)
+                        ( sleep 1; /usr/bin/mount-opt mount "/dev/$DEVNAME" ) &
+                        ;;
+                esac
+                ;;
+            remove)
+                case "$DEVNAME" in
+                    sd[a-z][0-9]*)
+                        /usr/bin/mount-opt umount "/dev/$DEVNAME"
+                        ;;
+                esac
+                ;;
+        esac
+        EOF
+    
+        # ---- 3) 首次开机: 禁 blockd, 兜底挂 p6 -> /opt ----
+        cat > files/etc/uci-defaults/99-mount-opt <<'EOF'
+        #!/bin/sh
+        # blockd 会把 U 盘挂到 /mnt/sda1 并可能乱挂 eMMC 分区, 禁用
+        [ -x /etc/init.d/blockd ] && /etc/init.d/blockd disable
+        mkdir -p /opt
+        ( n=0
+          while [ "$n" -lt 10 ] && [ ! -b /dev/mmcblk0p6 ]; do
+              sleep 1; n=$((n+1))
+          done
+          /usr/bin/mount-opt mount-root
+        ) &
+        exit 0
+        EOF
+        chmod +x files/etc/uci-defaults/99-mount-opt
+    
+        # ---- 4) 压制源码可能预置的 p5 -> /opt 挂载项 + 显式声明 p6 ----
+        cat > files/etc/uci-defaults/98-fix-fstab <<'EOF'
+        #!/bin/sh
+        touch /etc/config/fstab
+        for s in $(uci -q show fstab | sed -n 's/^fstab\.\([^.]*\)\.device=.*/\1/p'); do
+            case "$(uci -q get fstab.$s.device)" in
+                *mmcblk0p5*) uci -q delete fstab.$s ;;
+            esac
+        done
+        uci -q get fstab.optroot >/dev/null || {
+            uci -q set fstab.optroot=mount
+            uci -q set fstab.optroot.target='/opt'
+            uci -q set fstab.optroot.device='/dev/mmcblk0p6'
+            uci -q set fstab.optroot.fstype='ext4'
+            uci -q set fstab.optroot.options='rw,noatime'
+            uci -q set fstab.optroot.enabled='1'
+        }
+        uci -q commit fstab
+        exit 0
+        EOF
+        chmod +x files/etc/uci-defaults/98-fix-fstab
+    
+        echo "mount overlay generated."
+        find files/usr/bin/mount-opt files/etc/hotplug.d/block/40-mount-opt files/etc/uci-defaults/98-fix-fstab files/etc/uci-defaults/99-mount-opt
+    
+        
+    # =========================================================
+    # 5.58 (可选) dockerd 启动前等待 /opt 挂载
+    # =========================================================
+    - name: Make dockerd wait for /opt mount
+      run: |
+        cd openwrt
+        set -euo pipefail
+        INIT="feeds/packages/utils/dockerd/files/dockerd.init"
+        test -f "$INIT"
+        python3 - <<'PY'
+        from pathlib import Path
+        p = Path("feeds/packages/utils/dockerd/files/dockerd.init")
+        s = p.read_text()
+        wait = """start_service() {
+        \t# wait for /opt (USB auto-mount), max 15s; skip if no USB disk
+        \tlocal n=0
+        \twhile [ "$n" -lt 15 ]; do
+        \t\tgrep -qs " /opt " /proc/mounts && break
+        \t\tls /dev/sd*[0-9] >/dev/null 2>&1 || [ -b /dev/mmcblk0p6 ] || break
+        \t\tsleep 1
+        \t\tn=$((n+1))
+        \tdone
+        """
+        if "wait for /opt" not in s:
+            assert "start_service() {" in s, "anchor not found, upstream changed!"
+            s = s.replace("start_service() {", wait, 1)
+            p.write_text(s)
+        PY
+        grep -n "wait for /opt" "$INIT"
+
+    
     # =========================================================
     # 5.6 生成 Toolchain 缓存 Key
     # =========================================================
@@ -366,6 +637,7 @@ jobs:
         make download -j8 || make download -j1 V=s
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
+
     # =========================================================
     # 8. 编译固件
     # =========================================================
