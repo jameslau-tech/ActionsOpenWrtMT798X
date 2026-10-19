@@ -153,7 +153,6 @@ sed -i 's/ImmortalWrt/JWRT/g' package/base-files/files/bin/config_generate
 #sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $CFG_FILE
 #修改默认主机名
 #sed -i "s/hostname='.*'/hostname='$WRT_NAME'/g" $CFG_FILE
-
 # change APP Version
 # sed -i 's/0.47.075/0.47.088/g' package/feeds/luci/luci-app-openclash/Makefile
 
