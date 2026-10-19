@@ -84,4 +84,6 @@ git clone --depth=1 https://github.com/EasyTier/luci-app-easytier.git package/cu
 sed -i 's/+luci-theme-bootstrap/+luci-theme-argon/g; s/default Bootstrap theme/Argon theme/g' feeds/luci/collections/luci-light/Makefile
 #sed -i 's/+luci-theme-bootstrap/+luci-theme-aurora/g; s/default Bootstrap theme/Aurora theme/g' feeds/luci/collections/luci-light/Makefile
 
+./scripts/feeds update -a
+#./scripts/feeds install -a
 ./scripts/feeds install -a
