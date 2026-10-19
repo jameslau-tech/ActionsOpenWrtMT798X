@@ -1,7 +1,5 @@
 #!/bin/bash
 
-https://github.com/LazuliKao/luci-theme-fluent
-
 $ https://github.com/jameslau-tech/fanchmwrt
 1) kernel patch: target/linux/generic/hack-6.12/950-fwx-nf-conn-struct-user-hook.patch
 2) new package：package/fcm
@@ -13,12 +11,6 @@ https://github.com/VIKINGYFY/CloseWRT-CI
 https://github.com/Yuzhii0718
 https://github.com/x-wrt
 
-#节点订阅
-https://github.com/beck-8/subs-check
-https://github.com/shuaidaoya/FreeNodes
-#https://github.com/bia-pain-bache/BPB-Worker-Panel
-https://github.com/getumbrel/umbrel
-
 #OpenClaw
 https://github.com/fabricio3g/microbot-claw
 https://github.com/lzylipu/openclaw-skill-openwrt-redial
@@ -27,8 +19,6 @@ https://github.com/duomi998/luci-app-openclaw-js
 # 固件版本名称自定义
 #sed -i "s/DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION='OpenWrt By gino $(date +"%Y%m%d")'/g" package/base-files/files/etc/openwrt_release
 
-# 删除原默认主题
-#rm -rf package/lean/luci-theme-bootstrap
 
 # fam app
 CONFIG_PACKAGE_fwxd=y
