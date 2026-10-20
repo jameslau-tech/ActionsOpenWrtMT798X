@@ -139,6 +139,9 @@ net.ipv6.neigh.default.gc_thresh2 = 2048
 net.ipv6.neigh.default.gc_thresh3 = 4096
 # 限制单接口 IPv6 地址数量，节省 CPU
 net.ipv6.conf.all.max_addresses = 2
+# for IPTV
+net.ipv4.conf.all.force_igmp_version=2
+net.ipv4.conf.eth1.51.force_igmp_version=2
 SYSCTL
 
 
