@@ -27,7 +27,10 @@ on:
         description: 'SSH connection to Actions'
         required: false
         default: 'false'
-
+      disable_packages:
+        description: '要禁用的包（空格分隔，例: nano htop tcpdump）'
+        required: false
+        default: 'nano'  
 # =========================================================
 # 权限声明
 # 创建/上传/删除 Release、删除 workflow runs 必需
@@ -137,10 +140,37 @@ jobs:
     # 5.5 加载自定义配置 (diy-part3.sh)
     # =========================================================
     - name: Load custom configuration (diy-part3.sh)
+      env:
+        KEEP_I18N: base    # 空格分隔，如 "base package-manager"；留空则全部裁掉
       run: |
         [ -e "$CONFIG_FILE" ] && cp "$CONFIG_FILE" openwrt/.config
         chmod +x "$DIY_P3_SH"
         cd openwrt
+        set -euo pipefail
+        LANG_SYM="CONFIG_LUCI_LANG_zh_Hans"
+        echo ">>> [1/5] 强制开启简体中文语言开关 (${LANG_SYM}=y)"
+        sed -i "s|^# ${LANG_SYM} is not set|${LANG_SYM}=y|" .config
+        sed -i "s|^${LANG_SYM}=m|${LANG_SYM}=y|" .config
+        grep -q "^${LANG_SYM}=y$" .config || echo "${LANG_SYM}=y" >> .config
+        echo ">>> [2/5] make defconfig：物化所有 luci-i18n-* 条目（关键步骤，不能省）"
+        make defconfig
+        echo ">>> [3/5] 关闭全部中文翻译包"
+        sed -i -E 's/^(CONFIG_PACKAGE_luci-i18n-[a-zA-Z0-9_-]+-zh-cn)=(y|m)/# \1 is not set/' .config
+        echo ">>> [4/5] 放行白名单翻译: ${KEEP_I18N:-<空>}"
+        for name in $KEEP_I18N; do
+          [ -n "$name" ] || continue
+          sym="CONFIG_PACKAGE_luci-i18n-${name}-zh-cn"
+          sed -i "s|^# ${sym} is not set|${sym}=y|" .config
+          grep -q "^${sym}=y$" .config \
+           || { echo "ERROR: ${sym} 缺失（对应 LuCI 应用未选中）"; exit 1; }
+        done
+        echo ">>> [5/5] 最终 make defconfig 解析依赖"
+        make defconfig
+        KEEP_RE=$(echo "$KEEP_I18N" | tr ' ' '|')
+        BAD=$(grep -E '^CONFIG_PACKAGE_luci-i18n-[a-zA-Z0-9_-]+-zh-cn=y' .config \
+              | grep -vE "luci-i18n-(${KEEP_RE})-zh-cn" || true)
+        [ -z "$BAD" ] || { echo "白名单外残留:"; echo "$BAD"; exit 1; }
+        echo "✔ 翻译裁剪完成"
         "$GITHUB_WORKSPACE/$DIY_P3_SH"
 
     # =========================================================
@@ -411,6 +441,36 @@ jobs:
         PY
         grep -n "wait for /opt" "$INIT"
 
+    # =========================================================
+    # 5.59 动态禁用不需要的软件包
+    #      用法1：改 env.DISABLE_PACKAGES 默认值
+    #      用法2：workflow_dispatch 触发时填 disable_packages 输入
+    #      注意：正确语法是 "# CONFIG_x is not set"，不是 "=n"
+    # =========================================================
+    - name: Disable unwanted packages
+    env:
+      DISABLE_PACKAGES: ${{ github.event.inputs.disable_packages || 'nano' }}
+    run: |
+      cd openwrt
+      set -euo pipefail
+      echo ">>> 计划禁用: ${DISABLE_PACKAGES:-<无>}"
+      for name in $DISABLE_PACKAGES; do
+    	[ -n "$name" ] || continue
+    	sym="CONFIG_PACKAGE_${name}"
+    	sed -i -E "s/^${sym}=(y|m)\$/# ${sym} is not set/" .config
+    	grep -qE "^# ${sym} is not set\$" .config \
+    	  || echo "# ${sym} is not set" >> .config
+    	echo "  ✔ ${name}"
+      done
+      make defconfig
+      for name in $DISABLE_PACKAGES; do
+    	[ -n "$name" ] || continue
+    	if grep -qE "^CONFIG_PACKAGE_${name}=(y|m)" .config; then
+    	  echo "ERROR: ${name} 禁用失败（可能被其他已选包 select 依赖）"
+    	  exit 1
+    	fi
+      done
+      echo "✔ 软件包裁剪完成"
     
     # =========================================================
     # 5.6 生成 Toolchain 缓存 Key
