@@ -159,4 +159,8 @@ sed -i 's/ImmortalWrt/ZtbWrt/g' package/base-files/files/bin/config_generate
 # change APP Version
 # sed -i 's/0.47.075/0.47.088/g' package/feeds/luci/luci-app-openclash/Makefile
 
+# 追加gecoosac开关
+#sed -i 's|# CONFIG_PACKAGE_luci-app-gecoosac is not set|CONFIG_PACKAGE_luci-app-gecoosac=y|' .config
+
+
 echo "✅ SSH2 配置完成。"
