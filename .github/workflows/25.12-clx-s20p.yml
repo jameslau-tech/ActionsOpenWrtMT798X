@@ -145,70 +145,11 @@ jobs:
       run: |
         cd openwrt
         set -euo pipefail
-        LANG_SYM="CONFIG_LUCI_LANG_zh_Hans"
-        echo ">>> [1/5] 强制开启简体中文语言开关 (${LANG_SYM}=y)"
-        sed -i "s|^# ${LANG_SYM} is not set|${LANG_SYM}=y|" .config
-        sed -i "s|^${LANG_SYM}=m|${LANG_SYM}=y|" .config
-        grep -q "^${LANG_SYM}=y$" .config || echo "${LANG_SYM}=y" >> .config
-        echo ">>> [2/5] make defconfig：物化所有 luci-i18n-* 条目（关键步骤，不能省）"
-        make defconfig
-        echo ">>> [3/5] 关闭全部中文翻译包"
-        sed -i -E 's/^(CONFIG_PACKAGE_luci-i18n-[a-zA-Z0-9_-]+-zh-cn)=(y|m)/# \1 is not set/' .config
-        echo ">>> [4/5] 放行白名单翻译: ${KEEP_I18N:-<空>}"
-        for name in $KEEP_I18N; do
-          [ -n "$name" ] || continue
-          sym="CONFIG_PACKAGE_luci-i18n-${name}-zh-cn"
-          sed -i "s|^# ${sym} is not set|${sym}=y|" .config
-          grep -q "^${sym}=y$" .config \
-           || { echo "ERROR: ${sym} 缺失（对应 LuCI 应用未选中）"; exit 1; }
-        done
-        echo ">>> [5/5] 最终 make defconfig 解析依赖"
-        make defconfig
-        KEEP_RE=$(echo "$KEEP_I18N" | tr ' ' '|')
-        BAD=$(grep -E '^CONFIG_PACKAGE_luci-i18n-[a-zA-Z0-9_-]+-zh-cn=y' .config \
-              | grep -vE "luci-i18n-(${KEEP_RE})-zh-cn" || true)
-        [ -z "$BAD" ] || { echo "白名单外残留:"; echo "$BAD"; exit 1; }
-        echo "✔ 翻译裁剪完成"
-        # ---------------------------------------------------------
-        # 双重保险：终结 OpenClash 带来的 Rust 漫长编译噩梦
-        # diy-partX.sh
-        # ---------------------------------------------------------
-        echo ">>> 开始执行双重拦截：关闭 Ruby YJIT，跳过 rust/host 编译..."
-        
-        # ==========================================
-        # 方案 A：先从顶层配置文件强制取消 YJIT 编译
-        # ==========================================
-        # 遍历当前目录下的系统 .config 以及你仓库里的自定义 config (如 mt7986.config)
-        for conf in .config *.config; do
-            if [ -f "$conf" ]; then
-                # 1. 剔除可能存在的开启选项 (防冲突)
-                sed -i '/CONFIG_RUBY_ENABLE_YJIT/d' "$conf"
-                # 2. 强行追加关闭指令 (最高优先级)
-                echo "# CONFIG_RUBY_ENABLE_YJIT is not set" >> "$conf"
-                echo "✅ 方案 A 成功：已在 $conf 中强制声明关闭 RUBY_ENABLE_YJIT"
-            fi
-        done
-        
-        # ==========================================
-        # 方案 B：修改底层 Makefile，物理斩断依赖引擎
-        # ==========================================
-        RUBY_MK=$(find feeds -name "Makefile" -path "*/lang/ruby/Makefile" 2>/dev/null | head -n 1)
-        
-        if [ -f "$RUBY_MK" ]; then
-            echo ">>> 正在魔改 Ruby Makefile，执行物理级依赖阉割..."
-            
-            # 1. 防弹级正则破坏：在 config RUBY_ENABLE_YJIT 和 help 之间，将 default y 强制改为 default n
-            sed -i '/config RUBY_ENABLE_YJIT/,/help/{s/default y.*/default n/g}' "$RUBY_MK"
-            
-            # 2. 釜底抽薪：精准删掉引发 Rust 编译的宿主机依赖关键词
-            # sed -i 's/RUBY_ENABLE_YJIT:rust\/host//g' "$RUBY_MK"
-            
-            echo "✅ 方案 B 成功：Ruby 对 Rust 的依赖链已被彻底斩断！"
-        else
-            echo "⚠️ 警告: 未找到 Ruby 的 Makefile，可能路径有变，方案 B 跳过。"
+        # （顺带提醒：原 workflow 从未调用过 DIY_P3_SH，如需要请在此补上）
+        if [ -n "${DIY_P3_SH:-}" ] && [ -f "$GITHUB_WORKSPACE/$DIY_P3_SH" ]; then
+          chmod +x "$GITHUB_WORKSPACE/$DIY_P3_SH"
+          "$GITHUB_WORKSPACE/$DIY_P3_SH"
         fi
-        
-        echo "🎉 双重拦截部署完毕！"
 
     # =========================================================
     # 5.55 Patch dockerd: drop legacy iptables dependencies
@@ -727,9 +668,41 @@ jobs:
     # =========================================================
     - name: Download packages
       id: package
+      env:
+        KEEP_I18N: base        # 空格分隔，如 "base package-manager"；留空则全部裁掉
       run: |
         cd openwrt
         make defconfig
+            # ========== LuCI 中文翻译裁剪（白名单机制） ==========
+        set -euo pipefail
+        echo ">>> [1/4] 关闭全局语言开关 CONFIG_LUCI_LANG_zh_Hans"
+        sed -i '/^CONFIG_LUCI_LANG_zh_Hans=/d; /^# CONFIG_LUCI_LANG_zh_Hans is not set$/d' .config
+        echo '# CONFIG_LUCI_LANG_zh_Hans is not set' >> .config
+    
+        echo ">>> [2/4] 关闭全部 luci-i18n-*-zh-cn"
+        sed -i -E 's/^(CONFIG_PACKAGE_luci-i18n-[a-zA-Z0-9_-]+-zh-cn)=(y|m)/# \1 is not set/' .config
+    
+        echo ">>> [3/4] 放行白名单: ${KEEP_I18N:-<空>}"
+        for name in ${KEEP_I18N:-}; do
+          [ -n "$name" ] || continue
+          sym="CONFIG_PACKAGE_luci-i18n-${name}-zh-cn"
+          sed -i "s|^# ${sym} is not set|${sym}=y|" .config
+          grep -q "^${sym}=y$" .config || echo "${sym}=y" >> .config
+          if ! grep -qE "^CONFIG_PACKAGE_luci-app-${name}=(y|m)$" .config && \
+             ! grep -qE "^CONFIG_PACKAGE_luci-${name}=(y|m)$" .config; then
+            echo "ERROR: ${sym} 依赖的 LuCI 包未启用（luci-app-${name} 或 luci-${name}）"
+            exit 1
+          fi
+        done
+    
+        echo ">>> [4/4] 校验（不运行 defconfig）"
+        KEEP_RE=$(echo "${KEEP_I18N:-}" | tr ' ' '|')
+        BAD=$(grep -E '^CONFIG_PACKAGE_luci-i18n-[a-zA-Z0-9_-]+-zh-cn=(y|m)' .config \
+                | grep -vE "luci-i18n-(${KEEP_RE})-zh-cn" || true)
+        [ -z "$BAD" ] || { echo "白名单外残留:"; echo "$BAD"; exit 1; }
+        echo "✔ 翻译裁剪完成"
+        # =====================================================
+
         make download -j8 || make download -j1 V=s
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
@@ -787,7 +760,7 @@ jobs:
     # =========================================================
     - name: Organize files
       id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true'   # 原: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
         rm -rf packages
@@ -796,7 +769,7 @@ jobs:
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@v5
-      if: steps.organize.outputs.status == 'success' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && steps.organize.outputs.status == 'success'   # 原: ... && !cancelled()
       with:
         name: OpenWrt_firmware_${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
@@ -806,7 +779,7 @@ jobs:
     # =========================================================
     - name: Generate release tag
       id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true'   # 原: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
         AUTHOR=$(echo "${{ env.REPO_URL }}" | cut -d'/' -f4)
         DEVICE_NAME="${{ env.DEVICE_NAME }}"
@@ -841,7 +814,7 @@ jobs:
     # =========================================================
     - name: Upload firmware to release
       uses: softprops/action-gh-release@v2.3.2
-      if: steps.tag.outputs.status == 'success' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && steps.tag.outputs.status == 'success'   # 原: steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -871,7 +844,7 @@ jobs:
     # =========================================================
     - name: Remove old releases
       uses: dev-drprasad/delete-older-releases@v0.3.4
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true'   # 原: ... && !cancelled()
       with:
         keep_latest: 10
         delete_tags: true
