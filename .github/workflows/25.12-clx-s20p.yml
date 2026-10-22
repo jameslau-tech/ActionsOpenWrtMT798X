@@ -448,29 +448,29 @@ jobs:
     #      注意：正确语法是 "# CONFIG_x is not set"，不是 "=n"
     # =========================================================
     - name: Disable unwanted packages
-    env:
-      DISABLE_PACKAGES: ${{ github.event.inputs.disable_packages || 'nano' }}
-    run: |
-      cd openwrt
-      set -euo pipefail
-      echo ">>> 计划禁用: ${DISABLE_PACKAGES:-<无>}"
-      for name in $DISABLE_PACKAGES; do
-    	[ -n "$name" ] || continue
-    	sym="CONFIG_PACKAGE_${name}"
-    	sed -i -E "s/^${sym}=(y|m)\$/# ${sym} is not set/" .config
-    	grep -qE "^# ${sym} is not set\$" .config \
-    	  || echo "# ${sym} is not set" >> .config
-    	echo "  ✔ ${name}"
-      done
-      make defconfig
-      for name in $DISABLE_PACKAGES; do
-    	[ -n "$name" ] || continue
-    	if grep -qE "^CONFIG_PACKAGE_${name}=(y|m)" .config; then
-    	  echo "ERROR: ${name} 禁用失败（可能被其他已选包 select 依赖）"
-    	  exit 1
-    	fi
-      done
-      echo "✔ 软件包裁剪完成"
+      env:
+        DISABLE_PACKAGES: ${{ github.event.inputs.disable_packages || 'nano' }}
+      run: |
+        cd openwrt
+        set -euo pipefail
+        echo ">>> 计划禁用: ${DISABLE_PACKAGES:-<无>}"
+        for name in $DISABLE_PACKAGES; do
+      	[ -n "$name" ] || continue
+      	sym="CONFIG_PACKAGE_${name}"
+      	sed -i -E "s/^${sym}=(y|m)\$/# ${sym} is not set/" .config
+      	grep -qE "^# ${sym} is not set\$" .config \
+      	  || echo "# ${sym} is not set" >> .config
+      	echo "  ✔ ${name}"
+        done
+        make defconfig
+        for name in $DISABLE_PACKAGES; do
+      	[ -n "$name" ] || continue
+      	if grep -qE "^CONFIG_PACKAGE_${name}=(y|m)" .config; then
+      	  echo "ERROR: ${name} 禁用失败（可能被其他已选包 select 依赖）"
+      	  exit 1
+      	fi
+        done
+        echo "✔ 软件包裁剪完成"
     
     # =========================================================
     # 5.6 生成 Toolchain 缓存 Key
