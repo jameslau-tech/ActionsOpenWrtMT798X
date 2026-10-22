@@ -13,8 +13,7 @@
 - 21.02分支的脚本参考和借鉴加菲猫大佬的云编译脚本：https://github.com/lgs2007m/Actions-OpenWrt
 - 脚本参考有 七曜大佬 ：https://github.com/VIKINGYFY/CloseWRT-CI
 - apk包格式对安装的签名要求跟严格，一般的，安装第三方包可以用：apk add --allow-untrusted XXX.apk
-<img width="941" height="304" alt="image" src="https://github.com/user-attachments/assets/40c8fef1-68c7-4062-a453-ddcb7581ff5e" />
-    
+  
 注意事项：
      不死u-boot用 H 大的刷，地址：https://github.com/hanwckf/bl-mt798x/releases
      u-boot 刷机方法：https://cmi.hanwckf.top/p/mt798x-uboot-usage
