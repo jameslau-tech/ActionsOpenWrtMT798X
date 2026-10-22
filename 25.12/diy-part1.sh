@@ -27,6 +27,10 @@ rm -rf feeds/luci/applications/luci-app-passwall
 git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall.git package/custom/passwall
 git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall2.git package/custom/passwall2
 
+# 加入gecoosac/
+rm -rf package/openwrt-gecoosac
+git clone https://github.com/openwrt-fork/openwrt-gecoosac package/openwrt-gecoosac
+
 
 # OpenClash update to new version
 rm -rf feeds/luci/applications/luci-app-openclash
