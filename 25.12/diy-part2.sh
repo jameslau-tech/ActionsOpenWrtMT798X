@@ -162,5 +162,21 @@ sed -i 's/ImmortalWrt/ZtbWrt/g' package/base-files/files/bin/config_generate
 # 追加gecoosac开关
 #sed -i 's|# CONFIG_PACKAGE_luci-app-gecoosac is not set|CONFIG_PACKAGE_luci-app-gecoosac=y|' .config
 
+# Remove LuCI menus: System > Plugins, Network > Diagnostics
+python3 - <<'PY' || exit 1
+import json
+menus = {
+    'feeds/luci/modules/luci-mod-system/root/usr/share/luci/menu.d/luci-mod-system.json': 'admin/system/plugins',
+    'feeds/luci/modules/luci-mod-network/root/usr/share/luci/menu.d/luci-mod-network.json': 'admin/network/diagnostics',
+}
+for path, node in menus.items():
+    with open(path) as f:
+        data = json.load(f)
+    data.pop(node)
+    with open(path, 'w') as f:
+        json.dump(data, f, indent='\t')
+PY
+rm -f feeds/luci/modules/luci-mod-system/htdocs/luci-static/resources/view/system/plugins.js
+rm -f feeds/luci/modules/luci-mod-network/htdocs/luci-static/resources/view/network/diagnostics.js
 
 echo "✅ SSH2 配置完成。"
