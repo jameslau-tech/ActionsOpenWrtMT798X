@@ -145,8 +145,8 @@ net.ipv4.conf.eth1.51.force_igmp_version=2
 SYSCTL
 
 # allow un-trusted APK installation, if un-sure, delete it
-mkdir -p files/etc/apk/
-echo "allow-untrusted" > files/etc/apk/config
+#mkdir -p files/etc/apk/
+#echo "allow-untrusted" > files/etc/apk/config
 
 # 修改默认 IP (192.168.30.1)
 sed -i 's/192.168.1.1/192.168.2.1/g' package/base-files/files/bin/config_generate
