@@ -47,6 +47,10 @@ git clone --depth=1 https://github.com/kenzok8/openwrt-honk.git package/custom/d
 # git clone --depth=1 https://github.com/QiuSimons/luci-app-honk.git package/custom/daed-honk
 # git clone --depth=1 https://github.com/breeze303/openwrt-honk.git package/custom/daed-honk
 git clone --depth=1 https://github.com/kenzok8/openwrt-daede.git package/custom/daede
+# 修复：download.pl 只认小写 skip，把包内 Makefile 的大写 SKIP 统一改小写
+find package/custom/daed-honk -name Makefile -type f \
+  -exec sed -i 's/:=SKIP/:=skip/g' {} +
+
 
 # SSR+
 #git clone --depth=1 https://github.com/fw876/helloworld.git package/custom/ssrp
