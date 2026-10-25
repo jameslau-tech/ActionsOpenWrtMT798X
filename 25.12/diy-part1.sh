@@ -79,9 +79,15 @@ git clone --depth=1 https://github.com/EasyTier/luci-app-easytier.git package/cu
 #git clone --depth=1 https://github.com/Tokisaki-Galaxy/luci-app-tailscale-community.git package/custom/tailscale-community
 
 # 主题
-git clone --depth=1 -b master https://github.com/jerrykuku/luci-theme-argon.git package/custom/luci-theme-argon
+#git clone --depth=1 -b master https://github.com/jerrykuku/luci-theme-argon.git package/custom/luci-theme-argon
 #git clone --depth=1 https://github.com/eamonxg/luci-theme-aurora.git package/custom/luci-theme-aurora
 #git clone --depth=1 https://github.com/eamonxg/luci-app-aurora-config.git package/custom/luci-app-aurora-config
+
+# 删除 feeds 中 ImmortalWrt 自带的 Argon 主题
+rm -rf feeds/luci/themes/luci-theme-argon
+
+# 将 jerrykuku 的 Argon 主题克隆到 feeds 的对应目录
+git clone --depth=1 -b master https://github.com/jerrykuku/luci-theme-argon.git feeds/luci/themes/luci-theme-argon
 
 # change the default theme:
 sed -i 's/+luci-theme-bootstrap/+luci-theme-argon/g; s/default Bootstrap theme/Argon theme/g' feeds/luci/collections/luci-light/Makefile
