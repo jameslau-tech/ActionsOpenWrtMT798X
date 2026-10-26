@@ -13,7 +13,6 @@
 - apk包格式对安装的签名要求跟严格，一般的，安装第三方包可以用：apk add --allow-untrusted XXX.apk
   
 注意事项：
-     不死u-boot用 H 大的刷，地址：https://github.com/hanwckf/bl-mt798x/releases
-     u-boot 刷机方法：https://cmi.hanwckf.top/p/mt798x-uboot-usage
-     更新刷写固件时，跨版本更新的，记得不要保存设置，每次更新系统后再按住 rest键8 秒复位一次
-     刷写完新固件后，尤其是跨版本更新的，记得先清理浏览器缓存，再访问路由器进行设置。
+     1) uboot 推荐使用 https://github.com/Yuzhii0718/bl-mt798x-dhcpd
+     2) 每次编译不同的软件，可以先下载manifest文件看看软件包是否符合自己的需求
+     
