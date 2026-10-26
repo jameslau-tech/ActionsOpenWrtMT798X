@@ -1,7 +1,7 @@
-name: 25.12-clx-s20p-docker
+name: 25.12-clx-s20p-p-docker
 
 env:
-  DEVICE_NAME: 25.12-clx-s20p
+  DEVICE_NAME: 25.12-clx-s20p-p
   REPO_URL: https://github.com/chasey-dev/immortalwrt-mt798x-rebase
 #  REPO_URL: https://github.com/jameslau-tech/immortalwrt-mt798x-rebase
   REPO_BRANCH: 25.12
