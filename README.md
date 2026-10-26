@@ -12,7 +12,7 @@
 - 脚本参考有 七曜大佬 ：https://github.com/VIKINGYFY/CloseWRT-CI
 - apk包格式对安装的签名要求跟严格，一般的，安装第三方包可以用：apk add --allow-untrusted XXX.apk
   
-注意事项：
+注意事项：  
      1) uboot 推荐使用 https://github.com/Yuzhii0718/bl-mt798x-dhcpd  
      2) 每次编译不同的软件，可以先下载manifest文件看看软件包是否符合自己的需求
      
