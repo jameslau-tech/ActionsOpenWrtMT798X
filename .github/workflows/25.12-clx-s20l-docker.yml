@@ -3,10 +3,11 @@ name: 25.12-clx-s20l-docker
 env:
   DEVICE_NAME: 25.12-clx-s20l
   REPO_URL: https://github.com/chasey-dev/immortalwrt-mt798x-rebase
+#  REPO_URL: https://github.com/jameslau-tech/immortalwrt-mt798x-rebase
   REPO_BRANCH: 25.12
   FEEDS_CONF: feeds.conf.default
-#  CONFIG_FILE: 25.12/mt7986-clx-s20l-docker.config
   CONFIG_FILE: 25.12/25.12-clx-s20l.config
+  #CONFIG_FILE: 25.12/s20pc.config
   DIY_P1_SH: 25.12/diy-part1.sh
   DIY_P2_SH: 25.12/diy-part2.sh
   DIY_P3_SH: diy-partX.sh
@@ -26,7 +27,10 @@ on:
         description: 'SSH connection to Actions'
         required: false
         default: 'false'
-
+      disable_packages:
+        description: '要禁用的包（空格分隔，例: nano htop tcpdump）'
+        required: false
+        default: 'nano'  
 # =========================================================
 # 权限声明
 # 创建/上传/删除 Release、删除 workflow runs 必需
@@ -136,12 +140,257 @@ jobs:
     # 5.5 加载自定义配置 (diy-part3.sh)
     # =========================================================
     - name: Load custom configuration (diy-part3.sh)
+      env:
+        KEEP_I18N: base    # 空格分隔，如 "base package-manager"；留空则全部裁掉
       run: |
-        [ -e "$CONFIG_FILE" ] && cp "$CONFIG_FILE" openwrt/.config
-        chmod +x "$DIY_P3_SH"
         cd openwrt
-        "$GITHUB_WORKSPACE/$DIY_P3_SH"
+        set -euo pipefail
+        # （顺带提醒：原 workflow 从未调用过 DIY_P3_SH，如需要请在此补上）
+        if [ -n "${DIY_P3_SH:-}" ] && [ -f "$GITHUB_WORKSPACE/$DIY_P3_SH" ]; then
+          chmod +x "$GITHUB_WORKSPACE/$DIY_P3_SH"
+          "$GITHUB_WORKSPACE/$DIY_P3_SH"
+        fi
 
+    # =========================================================
+    # 5.55 Patch dockerd: drop legacy iptables dependencies
+    # =========================================================
+    - name: Remove legacy iptables dependencies from dockerd
+      run: |
+        cd openwrt
+        set -euo pipefail
+        MAKEFILE="feeds/packages/utils/dockerd/Makefile"
+        if [ ! -f "$MAKEFILE" ]; then
+          echo "ERROR: dockerd Makefile not found: $MAKEFILE"; exit 1
+        fi
+        echo "========== DEPENDS (before) =========="
+        sed -n '/define Package\/dockerd$/,/^endef/p' "$MAKEFILE"
+    
+        # 1) 整行删除（覆盖 +IPV6: 条件前缀、iptables 全部变体、续行反斜杠）
+        sed -i -E \
+          -e '/^[[:space:]]*\+(IPV6:)?(iptables|ip6tables|iptables-mod-[a-z0-9-]+|ip6tables-mod-[a-z0-9-]+|kmod-ipt-[a-z0-9-]+)[[:space:]]*\\?[[:space:]]*$/d' \
+          "$MAKEFILE"
+    
+        # 2) 兜底：同一行混排多个依赖时逐个剔除
+        sed -i -E \
+          -e 's/\+(IPV6:)?(iptables|ip6tables|iptables-mod-[a-z0-9-]+|ip6tables-mod-[a-z0-9-]+|kmod-ipt-[a-z0-9-]+)([[:space:]]+|$)/ /g' \
+          "$MAKEFILE"
+    
+        echo "========== DEPENDS (after) =========="
+        sed -n '/define Package\/dockerd$/,/^endef/p' "$MAKEFILE"
+    
+        # 3) 双向校验：iptables 系依赖清零，必要依赖未被误删
+        if grep -Eq '\+(IPV6:)?(iptables|ip6tables|kmod-ipt-)' "$MAKEFILE"; then
+          echo "ERROR: iptables dependencies still present"; exit 1
+        fi
+        for dep in containerd kmod-veth tini uci-firewall kmod-nf-ipvs; do
+          grep -q "+${dep}" "$MAKEFILE" \
+            || { echo "ERROR: ${dep} was accidentally removed"; exit 1; }
+        done
+        echo "dockerd iptables dependencies removed OK."
+    
+    # =========================================================
+    # 5.56 dockerd native nftables-only configuration (files overlay)
+    # =========================================================
+    - name: Generate dockerd nftables-only daemon config
+      run: |
+        cd openwrt
+        set -euo pipefail
+        mkdir -p files/etc/docker files/etc/uci-defaults
+    
+        # dockerd >=29 支持 firewall-backend=nftables
+        # dockerd <29 不支持该 key（会被拒启），降级为仅 iptables:false + fw4 NAT
+        # ImmortalWrt 25.12 的 packages feed 当前是 27.x，会走 else 分支；
+        # 保留分支判断是为了未来 feed 升级到 29 后无需再改 workflow
+        if grep -Eq '^PKG_VERSION:=(2[9-9]|[3-9][0-9])\.' \
+             feeds/packages/utils/dockerd/Makefile; then
+          cat > files/etc/docker/daemon.json <<'EOF'
+        {
+          "iptables": false,
+          "ip6tables": false,
+          "firewall-backend": "nftables",
+          "data-root": "/opt/docker",
+          "log-driver": "local",
+          "log-opts": {
+            "max-size": "10m",
+            "max-file": "3",
+            "compress": "true"
+          },
+          "registry-mirrors": [
+            "https://docker.1ms.run",
+            "https://docker.xuanyuan.me",
+            "https://docker.m.daocloud.io",
+            "https://docker.1panel.live",
+            "https://dockerproxy.net"
+          ]
+        }
+        EOF
+        else
+          cat > files/etc/docker/daemon.json <<'EOF'
+        {
+          "iptables": false,
+          "ip6tables": false,
+          "data-root": "/opt/docker",
+          "log-driver": "local",
+          "log-opts": {
+            "max-size": "10m",
+            "max-file": "3",
+            "compress": "true"
+          },
+          "registry-mirrors": [
+            "https://docker.1ms.run",
+            "https://docker.xuanyuan.me",
+            "https://docker.m.daocloud.io",
+            "https://docker.1panel.live",
+            "https://dockerproxy.net"
+          ]
+        }
+        EOF
+        fi
+        cat files/etc/docker/daemon.json
+    
+        # dockerd.init 的 process_config 读到 alt_config_file 后会软链过去
+        # 并跳过 UCI 配置生成与 iptables_add_blocking_rule
+        cat > files/etc/uci-defaults/99-dockerd-nftables <<'EOF'
+        #!/bin/sh
+        [ -f /etc/config/dockerd ] || touch /etc/config/dockerd
+        uci -q get dockerd.globals >/dev/null || uci -q set dockerd.globals=globals
+        uci -q set dockerd.globals.alt_config_file='/etc/docker/daemon.json'
+        uci -q set dockerd.globals.iptables='0'
+        uci -q set dockerd.globals.ip6tables='0'
+        uci -q commit dockerd
+    
+        # iptables=false 时 dockerd 不做 NAT，由 fw4 的 docker zone 负责
+        if ! uci -q get firewall.docker >/dev/null; then
+          uci -q add firewall zone >/dev/null
+          uci -q rename firewall.@zone[-1]='docker'
+          uci -q set firewall.docker.name='docker'
+          uci -q set firewall.docker.input='ACCEPT'
+          uci -q set firewall.docker.output='ACCEPT'
+          uci -q set firewall.docker.forward='ACCEPT'
+          uci -q set firewall.docker.masq='1'
+          uci -q add_list firewall.docker.network='docker'
+          uci -q commit firewall
+        fi
+        exit 0
+        EOF
+        chmod +x files/etc/uci-defaults/99-dockerd-nftables
+        echo "daemon.json + uci-defaults generated."
+    # =========================================================
+    # 5.57 eMMC p6 常驻挂载 /opt
+    #     - U 盘(sdaX)与 eMMC p1~p5 一律交由系统默认处理，不做干预
+    #     - 不禁用 blockd，U 盘自动挂到 /mnt/sdaN
+    # =========================================================
+    - name: Generate mount overlay (p6 -> /opt only, others left to system)
+      run: |
+        cd openwrt
+        set -euo pipefail
+        mkdir -p files/etc/uci-defaults
+    
+        # ---- 1) 压制源码可能预置的 p5 挂载项 + 声明 p6 -> /opt（开机由 fstab 挂载）----
+        cat > files/etc/uci-defaults/98-fix-fstab <<'EOF'
+        #!/bin/sh
+        touch /etc/config/fstab
+        for s in $(uci -q show fstab | sed -n 's/^fstab\.\([^.]*\)\.device=.*/\1/p'); do
+          case "$(uci -q get fstab.$s.device)" in
+            *mmcblk0p5*) uci -q delete fstab.$s ;;
+          esac
+        done
+        uci -q get fstab.optroot >/dev/null || {
+          uci -q set fstab.optroot=mount
+          uci -q set fstab.optroot.target='/opt'
+          uci -q set fstab.optroot.device='/dev/mmcblk0p6'
+          uci -q set fstab.optroot.fstype='ext4'
+          uci -q set fstab.optroot.options='rw,noatime'
+          uci -q set fstab.optroot.enabled='1'
+        }
+        uci -q commit fstab
+        exit 0
+        EOF
+        chmod +x files/etc/uci-defaults/98-fix-fstab
+    
+        # ---- 2) 首次开机兜底：等 p6 就绪后确保挂载到 /opt（幂等，不碰其他分区）----
+        cat > files/etc/uci-defaults/99-mount-opt <<'EOF'
+        #!/bin/sh
+        # 注意：不要 disable blockd —— U 盘自动挂载(/mnt/sdaN)依赖它
+        mkdir -p /opt
+        (
+          n=0
+          while [ "$n" -lt 10 ] && [ ! -b /dev/mmcblk0p6 ]; do
+            sleep 1; n=$((n+1))
+          done
+          if ! grep -qs " /opt " /proc/mounts && [ -b /dev/mmcblk0p6 ]; then
+            mount -o rw,noatime /dev/mmcblk0p6 /opt 2>/dev/null \
+              && logger -t mount-opt "mounted /dev/mmcblk0p6 -> /opt"
+          fi
+        ) &
+        exit 0
+        EOF
+        chmod +x files/etc/uci-defaults/99-mount-opt
+    
+        echo "mount overlay generated."
+        find files/etc/uci-defaults/98-fix-fstab files/etc/uci-defaults/99-mount-opt
+   
+    # =========================================================
+    # 5.58 dockerd 启动前等待 /opt（mmcblk0p6）挂载完成
+    # =========================================================
+    - name: Make dockerd wait for /opt mount
+      run: |
+        cd openwrt
+        set -euo pipefail
+        INIT="feeds/packages/utils/dockerd/files/dockerd.init"
+        test -f "$INIT"
+        python3 - <<'PY'
+        from pathlib import Path
+        p = Path("feeds/packages/utils/dockerd/files/dockerd.init")
+        s = p.read_text()
+        wait = """start_service() {
+        \t# wait for /opt (mmcblk0p6) to be mounted, max 15s
+        \tlocal n=0
+        \twhile [ "$n" -lt 15 ]; do
+        \t\tgrep -qs " /opt " /proc/mounts && break
+        \t\t[ -b /dev/mmcblk0p6 ] || break
+        \t\tsleep 1
+        \t\tn=$((n+1))
+        \tdone
+        """
+        if "wait for /opt" not in s:
+            assert "start_service() {" in s, "anchor not found, upstream changed!"
+            s = s.replace("start_service() {", wait, 1)
+        p.write_text(s)
+        PY
+        grep -n "wait for /opt" "$INIT"          
+   
+    # =========================================================
+    # 5.59 动态禁用不需要的软件包
+    #      用法1：改 env.DISABLE_PACKAGES 默认值
+    #      用法2：workflow_dispatch 触发时填 disable_packages 输入
+    #      注意：正确语法是 "# CONFIG_x is not set"，不是 "=n"
+    # =========================================================
+    - name: Disable unwanted packages
+      env:
+        DISABLE_PACKAGES: ${{ github.event.inputs.disable_packages || 'nano' }}
+      run: |
+        cd openwrt
+        set -euo pipefail
+        echo ">>> 计划禁用: ${DISABLE_PACKAGES:-<无>}"
+        for name in $DISABLE_PACKAGES; do
+          [ -n "$name" ] || continue
+          sym="CONFIG_PACKAGE_${name}"
+          sed -i -E "s/^${sym}=(y|m)\$/# ${sym} is not set/" .config
+          grep -qE "^# ${sym} is not set\$" .config \
+            || echo "# ${sym} is not set" >> .config
+          echo "  ✔ ${name}"
+        done
+        make defconfig
+        for name in $DISABLE_PACKAGES; do
+          [ -n "$name" ] || continue
+          if grep -qE "^CONFIG_PACKAGE_${name}=(y|m)" .config; then
+            echo "ERROR: ${name} 禁用失败（可能被其他已选包 select 依赖）"
+            exit 1
+          fi
+        done
+        echo "✔ 软件包裁剪完成"
+  
     # =========================================================
     # 5.6 生成 Toolchain 缓存 Key
     # =========================================================
@@ -361,9 +610,41 @@ jobs:
     # =========================================================
     - name: Download packages
       id: package
+      env:
+        KEEP_I18N: base        # 空格分隔，如 "base package-manager"；留空则全部裁掉
       run: |
         cd openwrt
         make defconfig
+            # ========== LuCI 中文翻译裁剪（白名单机制） ==========
+        set -euo pipefail
+        echo ">>> [1/4] 关闭全局语言开关 CONFIG_LUCI_LANG_zh_Hans"
+        sed -i '/^CONFIG_LUCI_LANG_zh_Hans=/d; /^# CONFIG_LUCI_LANG_zh_Hans is not set$/d' .config
+        echo '# CONFIG_LUCI_LANG_zh_Hans is not set' >> .config
+    
+        echo ">>> [2/4] 关闭全部 luci-i18n-*-zh-cn"
+        sed -i -E 's/^(CONFIG_PACKAGE_luci-i18n-[a-zA-Z0-9_-]+-zh-cn)=(y|m)/# \1 is not set/' .config
+    
+        echo ">>> [3/4] 放行白名单: ${KEEP_I18N:-<空>}"
+        for name in ${KEEP_I18N:-}; do
+          [ -n "$name" ] || continue
+          sym="CONFIG_PACKAGE_luci-i18n-${name}-zh-cn"
+          sed -i "s|^# ${sym} is not set|${sym}=y|" .config
+          grep -q "^${sym}=y$" .config || echo "${sym}=y" >> .config
+          if ! grep -qE "^CONFIG_PACKAGE_luci-app-${name}=(y|m)$" .config && \
+             ! grep -qE "^CONFIG_PACKAGE_luci-${name}=(y|m)$" .config; then
+            echo "ERROR: ${sym} 依赖的 LuCI 包未启用（luci-app-${name} 或 luci-${name}）"
+            exit 1
+          fi
+        done
+    
+        echo ">>> [4/4] 校验（不运行 defconfig）"
+        KEEP_RE=$(echo "${KEEP_I18N:-}" | tr ' ' '|')
+        BAD=$(grep -E '^CONFIG_PACKAGE_luci-i18n-[a-zA-Z0-9_-]+-zh-cn=(y|m)' .config \
+                | grep -vE "luci-i18n-(${KEEP_RE})-zh-cn" || true)
+        [ -z "$BAD" ] || { echo "白名单外残留:"; echo "$BAD"; exit 1; }
+        echo "✔ 翻译裁剪完成"
+        # =====================================================
+
         make download -j8 || make download -j1 V=s
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
