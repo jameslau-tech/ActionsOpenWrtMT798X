@@ -13,7 +13,6 @@
 # 1. NAS feeds
 #echo 'src-git nas https://github.com/linkease/nas-packages.git;master' >> feeds.conf.default
 #echo 'src-git nas_luci https://github.com/linkease/nas-packages-luci.git;main' >> feeds.conf.default
-
 # 2. iStore feeds
 #echo 'src-git istore https://github.com/linkease/istore;main' >> feeds.conf.default
 
@@ -22,10 +21,10 @@ mkdir -p package/custom
 # 科学插件
 # Passwall
 rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,xray-plugin,geoview,shadow-tls}
-git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git package/custom/passwall-packages
-rm -rf feeds/luci/applications/luci-app-passwall
-git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall.git package/custom/passwall
-git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall2.git package/custom/passwall2
+#git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git package/custom/passwall-packages
+#rm -rf feeds/luci/applications/luci-app-passwall
+#git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall.git package/custom/passwall
+#git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall2.git package/custom/passwall2
 
 # 加入gecoosac/
 rm -rf package/openwrt-gecoosac
@@ -42,7 +41,7 @@ git clone --depth=1 -b dev https://github.com/vernesong/OpenClash.git feeds/luci
 #git clone --depth=1 https://github.com/nikkinikki-org/OpenWrt-momo.git package/custom/momo
 
 
-# Daed
+# Daed (kenzok8 build for X86)
 #git clone --depth=1 https://github.com/kenzok8/openwrt-honk.git package/custom/daed-honk
 git clone --depth=1 https://github.com/QiuSimons/luci-app-honk.git package/custom/daed-honk
 # git clone --depth=1 https://github.com/breeze303/openwrt-honk.git package/custom/daed-honk
@@ -59,7 +58,7 @@ git clone --depth=1 https://github.com/QiuSimons/luci-app-honk.git package/custo
 #git clone --depth=1 https://github.com/sirpdboy/luci-app-poweroffdevice.git package/custom/poweroffdevice
 #git clone --depth=1 https://github.com/isalikai/luci-app-owq-wol.git package/custom/owq-wol
 #git clone --depth=1 https://github.com/gdy666/luci-app-lucky.git package/custom/lucky
-git clone --depth=1 https://github.com/sbwml/luci-app-openlist2.git package/custom/openlist2
+#git clone --depth=1 https://github.com/sbwml/luci-app-openlist2.git package/custom/openlist2
 
 #git clone --depth=1 https://github.com/sirpdboy/luci-app-watchdog.git package/custom/watchdog
 #git clone --depth=1 https://github.com/sirpdboy/luci-app-taskplan.git package/custom/taskplan
@@ -69,11 +68,11 @@ git clone --depth=1 https://github.com/sbwml/luci-app-openlist2.git package/cust
 
 # 升级替换 mosdns
 # drop mosdns and v2ray-geodata packages that come with the source
-#find ./ | grep Makefile | grep v2ray-geodata | xargs rm -f
-#find ./ | grep Makefile | grep mosdns | xargs rm -f
+find ./ | grep Makefile | grep v2ray-geodata | xargs rm -f
+find ./ | grep Makefile | grep mosdns | xargs rm -f
 
 #git clone https://github.com/sbwml/luci-app-mosdns -b v5 package/custom/mosdns
-#git clone https://github.com/sbwml/v2ray-geodata package/custom/v2ray-geodata
+git clone https://github.com/sbwml/v2ray-geodata package/custom/v2ray-geodata
 
 rm -rf feeds/packages/lang/golang
 git clone https://github.com/sbwml/packages_lang_golang -b 26.x feeds/packages/lang/golang
@@ -83,7 +82,6 @@ git clone --depth=1 https://github.com/EasyTier/luci-app-easytier.git package/cu
 #git clone --depth=1 https://github.com/Tokisaki-Galaxy/luci-app-tailscale-community.git package/custom/tailscale-community
 
 # 主题
-#git clone --depth=1 -b master https://github.com/jerrykuku/luci-theme-argon.git package/custom/luci-theme-argon
 #git clone --depth=1 https://github.com/eamonxg/luci-theme-aurora.git package/custom/luci-theme-aurora
 #git clone --depth=1 https://github.com/eamonxg/luci-app-aurora-config.git package/custom/luci-app-aurora-config
 
