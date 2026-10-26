@@ -144,20 +144,30 @@ net.ipv4.conf.all.force_igmp_version=2
 net.ipv4.conf.eth1.51.force_igmp_version=2
 SYSCTL
 
+# allow un-trusted APK installation, if un-sure, delete it
+#mkdir -p files/etc/apk/
+#echo "allow-untrusted" > files/etc/apk/config
 
 # 修改默认 IP (192.168.30.1)
 sed -i 's/192.168.1.1/192.168.2.2/g' package/base-files/files/bin/config_generate
 sed -i 's/ImmortalWrt/ZtbWrt/g' package/base-files/files/bin/config_generate
 #sed -i 's/hostname='.*'/hostname='JWRT'/g' package/base-files/files/bin/config_generate
 
+#CFG_FILE="./package/base-files/files/bin/config_generate"
+#修改默认IP地址
+#sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $CFG_FILE
+#修改默认主机名
+#sed -i "s/hostname='.*'/hostname='$WRT_NAME'/g" $CFG_FILE
 # change APP Version
 # sed -i 's/0.47.075/0.47.088/g' package/feeds/luci/luci-app-openclash/Makefile
+
+# 追加gecoosac开关
+#sed -i 's|# CONFIG_PACKAGE_luci-app-gecoosac is not set|CONFIG_PACKAGE_luci-app-gecoosac=y|' .config
 
 # Remove LuCI menus: System > Plugins, Network > Diagnostics
 python3 - <<'PY' || exit 1
 import json
 menus = {
-    'feeds/luci/modules/luci-mod-system/root/usr/share/luci/menu.d/luci-mod-system.json': 'admin/system/plugins',
     'feeds/luci/modules/luci-mod-network/root/usr/share/luci/menu.d/luci-mod-network.json': 'admin/network/diagnostics',
 }
 for path, node in menus.items():
@@ -167,7 +177,6 @@ for path, node in menus.items():
     with open(path, 'w') as f:
         json.dump(data, f, indent='\t')
 PY
-rm -f feeds/luci/modules/luci-mod-system/htdocs/luci-static/resources/view/system/plugins.js
 rm -f feeds/luci/modules/luci-mod-network/htdocs/luci-static/resources/view/network/diagnostics.js
 
 echo "✅ SSH2 配置完成。"
