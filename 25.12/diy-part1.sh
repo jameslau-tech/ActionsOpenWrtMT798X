@@ -42,14 +42,14 @@ git clone --depth=1 -b dev https://github.com/vernesong/OpenClash.git feeds/luci
 
 
 # Daed (kenzok8 build for X86)
-#git clone --depth=1 https://github.com/kenzok8/openwrt-honk.git package/custom/daed-honk
-git clone --depth=1 https://github.com/QiuSimons/luci-app-honk.git package/custom/daed-honk
+rm -rf feeds/luci/applications/luci-app-dae
+rm -rf feeds/luci/applications/luci-app-honk
+#git clone --depth=1 https://github.com/kenzok8/openwrt-honk.git package/custom/honk
+git clone --depth=1 https://github.com/QiuSimons/luci-app-honk.git  package/custom/honk
 # git clone --depth=1 https://github.com/breeze303/openwrt-honk.git package/custom/daed-honk
-#git clone --depth=1 https://github.com/kenzok8/openwrt-daede.git package/custom/daede
+#git clone  --depth=1 https://github.com/QiuSimons/luci-app-dae  feeds/luci/applications/luci-app-dae
 # 修复：download.pl 只认小写 skip，把包内 Makefile 的大写 SKIP 统一改小写
-#find package/custom/daed-honk -name Makefile -type f \
-#  -exec sed -i 's/:=SKIP/:=skip/g' {} +
-
+sed -i 's/?=SKIP$/?=skip/' "$PKG_DIR/honk/honk/Makefile"
 
 # SSR+
 #git clone --depth=1 https://github.com/fw876/helloworld.git package/custom/ssrp
@@ -72,7 +72,7 @@ find ./ | grep Makefile | grep v2ray-geodata | xargs rm -f
 find ./ | grep Makefile | grep mosdns | xargs rm -f
 
 #git clone https://github.com/sbwml/luci-app-mosdns -b v5 package/custom/mosdns
-git clone https://github.com/sbwml/v2ray-geodata package/custom/v2ray-geodata
+#git clone https://github.com/sbwml/v2ray-geodata package/custom/v2ray-geodata
 
 rm -rf feeds/packages/lang/golang
 git clone https://github.com/sbwml/packages_lang_golang -b 26.x feeds/packages/lang/golang
