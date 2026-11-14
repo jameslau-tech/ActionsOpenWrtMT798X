@@ -50,24 +50,6 @@ git clone --depth=1 https://github.com/QiuSimons/luci-app-honk.git  package/cust
 # 修复：download.pl 只认小写 skip，把包内 Makefile 的大写 SKIP 统一改小写
 sed -i 's/?=SKIP$/?=skip/' "$PKG_DIR/honk/honk/Makefile"
 
-HONK_DIR="$PKG_DIR/honk/honk"
-HONK_OUT="$HONK_DIR/files/honk-core.bin"
-if [ -s "$HONK_OUT" ]; then
-    log " ↷ honk-core.bin 已存在，跳过预放"
-else
-    group "预放 honk-core.bin（免 zig 工具链）"
-    curl -fsSL --retry 3 -o /tmp/honk-core.tar.gz \
-      "https://github.com/daeuniverse/honk/releases/download/v0.1.0-beta.2/honk-core-v0.1.0-beta.2-aarch64-unknown-linux-musl-stock-native-api.tar.gz"
-    echo "bef60542db1d29fa87ad3b5300d0960a1bd173b7ba1121b423b27985a202eb2c  /tmp/honk-core.tar.gz" | sha256sum -c -
-    rm -rf /tmp/honkpkg && mkdir -p /tmp/honkpkg
-    tar -xzf /tmp/honk-core.tar.gz -C /tmp/honkpkg
-    core="$(find /tmp/honkpkg -type f -name honk-core -print -quit)"
-    [ -n "$core" ] || die "tarball 内未找到 honk-core，release 结构可能已变"
-    mkdir -p "$HONK_DIR/files"
-    cp "$core" "$HONK_OUT"
-    log " ✅ 已预放 honk-core.bin ($(du -h "$HONK_OUT" | cut -f1))"
-    endgroup
-fi
 # ------------------------------------------------------------------
 # honk 仓库的 Makefile 把 PKG_HASH 写成大写 SKIP 占位，
 # OpenWrt scripts/download.pl 只识别小写 skip 跳过校验；
