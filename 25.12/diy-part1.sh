@@ -42,13 +42,13 @@ git clone --depth=1 -b dev https://github.com/vernesong/OpenClash.git feeds/luci
 
 
 # Daed (kenzok8 build for X86)
-rm -rf feeds/luci/applications/luci-app-dae
-rm -rf feeds/luci/applications/luci-app-honk
+#rm -rf feeds/luci/applications/luci-app-dae
+#rm -rf feeds/luci/applications/luci-app-honk
 #git clone --depth=1 https://github.com/kenzok8/openwrt-honk.git package/custom/honk
-git clone --depth=1 https://github.com/QiuSimons/luci-app-honk.git  package/custom/honk
+#git clone --depth=1 https://github.com/QiuSimons/luci-app-honk.git  package/custom/honk
 #git clone  --depth=1 https://github.com/QiuSimons/luci-app-dae  feeds/luci/applications/luci-app-dae
 # 修复：download.pl 只认小写 skip，把包内 Makefile 的大写 SKIP 统一改小写
-sed -i 's/?=SKIP$/?=skip/' "$PKG_DIR/honk/honk/Makefile"
+#sed -i 's/?=SKIP$/?=skip/' "$PKG_DIR/honk/honk/Makefile"
 
 # ------------------------------------------------------------------
 # honk 仓库的 Makefile 把 PKG_HASH 写成大写 SKIP 占位，
@@ -57,19 +57,18 @@ sed -i 's/?=SKIP$/?=skip/' "$PKG_DIR/honk/honk/Makefile"
 # 这里把 PKG_HASH / PKG_MIRROR_HASH 的纯 SKIP 占位统一改成 skip。
 # 只匹配纯占位行，不会误伤真实哈希。
 # ------------------------------------------------------------------
-sed -i 's/?=SKIP$/?=skip/' "$PKG_DIR/honk/honk/Makefile"
 
-if [ -d "$PKG_DIR/honk" ]; then
-  honk_patched=0
-  while IFS= read -r -d '' mkfile; do
-    if grep -qE '^[[:space:]]*PKG_(HASH|MIRROR_HASH)[[:space:]]*:?=[[:space:]]*SKIP[[:space:]]*$' "$mkfile"; then
-      sed -i -E 's/^([[:space:]]*PKG_(HASH|MIRROR_HASH)[[:space:]]*:?=[[:space:]]*)SKIP[[:space:]]*$/\1skip/' "$mkfile"
-      log "  ✏ 修正 $(basename "$(dirname "$mkfile")")/Makefile：PKG_*HASH SKIP → skip"
-      honk_patched=$((honk_patched + 1))
-    fi
-  done < <(find "$PKG_DIR/honk" -type f -name Makefile -print0)
-  log "  ✅ honk Makefile 哈希占位修正: ${honk_patched} 处"
-fi
+#if [ -d "$PKG_DIR/honk" ]; then
+#  honk_patched=0
+#  while IFS= read -r -d '' mkfile; do
+#    if grep -qE '^[[:space:]]*PKG_(HASH|MIRROR_HASH)[[:space:]]*:?=[[:space:]]*SKIP[[:space:]]*$' "$mkfile"; then
+#      sed -i -E 's/^([[:space:]]*PKG_(HASH|MIRROR_HASH)[[:space:]]*:?=[[:space:]]*)SKIP[[:space:]]*$/\1skip/' "$mkfile"
+#      log "  ✏ 修正 $(basename "$(dirname "$mkfile")")/Makefile：PKG_*HASH SKIP → skip"
+#      honk_patched=$((honk_patched + 1))
+#    fi
+#  done < <(find "$PKG_DIR/honk" -type f -name Makefile -print0)
+#  log "  ✅ honk Makefile 哈希占位修正: ${honk_patched} 处"
+#fi
 
 # SSR+
 #git clone --depth=1 https://github.com/fw876/helloworld.git package/custom/ssrp
