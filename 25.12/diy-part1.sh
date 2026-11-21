@@ -15,6 +15,9 @@
 #echo 'src-git nas_luci https://github.com/linkease/nas-packages-luci.git;main' >> feeds.conf.default
 # 2. iStore feeds
 #echo 'src-git istore https://github.com/linkease/istore;main' >> feeds.conf.default
+#honk/dae
+echo 'src-git daeuniverse https://github.com/daeuniverse/openwrt-packages.git;main' >> feeds.conf.default
+
 
 mkdir -p package/custom
 
