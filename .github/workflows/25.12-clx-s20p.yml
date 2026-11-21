@@ -659,25 +659,24 @@ jobs:
 
         echo "开始编译... ($(nproc) 线程)"
         df -hT /
-        # ---- 定位内核 vmlinux（含 BTF），传给 vmlinux-btf 包 ----
+
+        # ---- 阶段 1：先编译内核（此时 vmlinux 产出）----
+        make target/linux/compile -j"$(nproc)" \
+          || make target/linux/compile -j1 V=s
+    
+        # ---- 阶段 2：定位 vmlinux（现在 build_dir 一定存在）----
         KERNEL_DIR=$(ls -d build_dir/target-*/linux-* 2>/dev/null | head -n1)
         echo ">>> 内核 build 目录: ${KERNEL_DIR:-<未找到>}"
-        [ -n "$KERNEL_DIR" ] && ls -lh "$KERNEL_DIR"/vmlinux 2>/dev/null || true
-  
-        BTF_SRC="$KERNEL_DIR/vmlinux"
-        if [ -n "$KERNEL_DIR" ] && [ -f "$BTF_SRC" ]; then
-          echo "✅ 内核 BTF blob: $BTF_SRC"
-          export VMLINUX_BTF_SRC="$BTF_SRC"
-          # 版本号从内核目录名提取，如 linux-6.12.30 -> 6.12.30
-          export VMLINUX_BTF_VERSION="$(basename "$KERNEL_DIR" | sed 's/^linux-//')"
-          echo "✅ VMLINUX_BTF_VERSION=$VMLINUX_BTF_VERSION"
-        else
-          echo "❌ 未能定位内核 vmlinux，构建将失败（不再静默跳过）"
-          find build_dir -maxdepth 3 -name vmlinux -o -maxdepth 3 -name "linux-*" | head -20
+        if [ -z "$KERNEL_DIR" ] || [ ! -f "$KERNEL_DIR/vmlinux" ]; then
+          echo "❌ 内核编译后仍未找到 vmlinux"
+          find build_dir -maxdepth 3 -name vmlinux 2>/dev/null | head
           exit 1
         fi
-
-
+        export VMLINUX_BTF_SRC="$KERNEL_DIR/vmlinux"
+        export VMLINUX_BTF_VERSION="$(basename "$KERNEL_DIR" | sed 's/^linux-//')"
+        echo "✅ BTF blob: $VMLINUX_BTF_SRC  版本: $VMLINUX_BTF_VERSION"
+    
+        # ---- 阶段 3：全量编译（vmlinux-btf 会继承上面的环境变量）----
         if make -j"$(nproc)"; then
           echo "多线程编译成功"
         elif make -j1; then
