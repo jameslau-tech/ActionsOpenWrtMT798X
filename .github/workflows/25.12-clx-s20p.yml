@@ -659,17 +659,24 @@ jobs:
 
         echo "开始编译... ($(nproc) 线程)"
         df -hT /
-        # ---- 新增：定位内核 vmlinux（含 BTF），传给 vmlinux-btf 包 ----
-        # 内核在 target/linux 阶段先编译，包阶段可拿到产物
-        BTF_SRC=$(find build_dir/target-*/linux-mediatek_filogic \
-                  -maxdepth 2 -name vmlinux -type f 2>/dev/null | head -n1)
-        if [ -n "$BTF_SRC" ]; then
+        # ---- 定位内核 vmlinux（含 BTF），传给 vmlinux-btf 包 ----
+        KERNEL_DIR=$(ls -d build_dir/target-*/linux-* 2>/dev/null | head -n1)
+        echo ">>> 内核 build 目录: ${KERNEL_DIR:-<未找到>}"
+        [ -n "$KERNEL_DIR" ] && ls -lh "$KERNEL_DIR"/vmlinux 2>/dev/null || true
+  
+        BTF_SRC="$KERNEL_DIR/vmlinux"
+        if [ -n "$KERNEL_DIR" ] && [ -f "$BTF_SRC" ]; then
           echo "✅ 内核 BTF blob: $BTF_SRC"
           export VMLINUX_BTF_SRC="$BTF_SRC"
-          export VMLINUX_BTF_VERSION="$(grep '^CONFIG_LINUX_6_12' .config >/dev/null && echo 6.12)"
+          # 版本号从内核目录名提取，如 linux-6.12.30 -> 6.12.30
+          export VMLINUX_BTF_VERSION="$(basename "$KERNEL_DIR" | sed 's/^linux-//')"
+          echo "✅ VMLINUX_BTF_VERSION=$VMLINUX_BTF_VERSION"
         else
-          echo "⚠️ 未找到内核 vmlinux，vmlinux-btf 将按原逻辑处理"
+          echo "❌ 未能定位内核 vmlinux，构建将失败（不再静默跳过）"
+          find build_dir -maxdepth 3 -name vmlinux -o -maxdepth 3 -name "linux-*" | head -20
+          exit 1
         fi
+
 
         if make -j"$(nproc)"; then
           echo "多线程编译成功"
