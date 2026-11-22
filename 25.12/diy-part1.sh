@@ -16,7 +16,7 @@
 # 2. iStore feeds
 #echo 'src-git istore https://github.com/linkease/istore;main' >> feeds.conf.default
 #honk/dae
-echo 'src-git daeuniverse https://github.com/daeuniverse/openwrt-packages.git;main' >> feeds.conf.default
+#echo 'src-git daeuniverse https://github.com/daeuniverse/openwrt-packages.git;main' >> feeds.conf.default
 
 
 mkdir -p package/custom
@@ -46,10 +46,10 @@ git clone --depth=1 -b dev https://github.com/vernesong/OpenClash.git feeds/luci
 
 # Daed (kenzok8 build for X86)
 #rm -rf feeds/luci/applications/luci-app-dae
-#rm -rf feeds/luci/applications/luci-app-honk
+rm -rf feeds/luci/applications/luci-app-honk
 #git clone --depth=1 https://github.com/kenzok8/openwrt-honk.git package/custom/honk
-#git clone --depth=1 https://github.com/QiuSimons/luci-app-honk.git  package/custom/honk
-#git clone  --depth=1 https://github.com/QiuSimons/luci-app-dae  feeds/luci/applications/luci-app-dae
+git clone --depth=1 https://github.com/QiuSimons/luci-app-honk.git  package/custom/honk
+git clone  --depth=1 https://github.com/QiuSimons/luci-app-dae  feeds/luci/applications/luci-app-dae
 # 修复：download.pl 只认小写 skip，把包内 Makefile 的大写 SKIP 统一改小写
 #sed -i 's/?=SKIP$/?=skip/' "$PKG_DIR/honk/honk/Makefile"
 
