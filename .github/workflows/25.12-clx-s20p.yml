@@ -644,7 +644,7 @@ jobs:
         [ -z "$BAD" ] || { echo "白名单外残留:"; echo "$BAD"; exit 1; }
         echo "✔ 翻译裁剪完成"
         # =====================================================
-        #make defconfig    # 让 .config 重新同步，消除 out of sync
+
         make download -j8 || make download -j1 V=s
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
