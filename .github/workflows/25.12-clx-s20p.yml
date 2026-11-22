@@ -668,17 +668,19 @@ jobs:
         fi
     
         # ---- 阶段 2：正确地定位 vmlinux（任意深度）----
+        # ---- 阶段 2：定位并固定 blob ----
         VMLINUX=$(find build_dir/target-*/linux-* -name vmlinux -type f 2>/dev/null | head -n1)
-    
         if [ -z "$VMLINUX" ]; then
-          echo "❌ vmlinux 确实不存在，内核构建详情："
-          echo "---- 内核 build 目录内容 ----"
-          ls -R build_dir/target-*/linux-* 2>/dev/null | head -100
-          echo "---- kernel_build.log 中的错误 ----"
-          grep -iE "error|fatal|cannot|No such" kernel_build.log | head -50
-          echo "---- 日志尾部 ----"
-          tail -100 kernel_build.log
-          exit 1
+          echo "❌ vmlinux 不存在"; exit 1
+        fi
+        
+        # 拷贝到工作目录，防止后续 make 清理掉
+        cp "$VMLINUX" "$GITHUB_WORKSPACE/vmlinux-btf-blob"
+        KERNEL_VER=$(basename "$(dirname "$VMLINUX")" | sed 's/^linux-//')
+        
+        # 可选但强烈建议：验证这个 vmlinux 真的含 BTF
+        if ! grep -q "BTF" "$GITHUB_WORKSPACE/vmlinux-btf-blob"; then
+          echo "⚠️ 该 vmlinux 中未检测到 BTF 段，可能内核没开 CONFIG_DEBUG_INFO_BTF"
         fi
     
         export VMLINUX_BTF_SRC="$VMLINUX"
@@ -686,17 +688,13 @@ jobs:
         echo "✅ BTF blob: $VMLINUX_BTF_SRC 版本: $VMLINUX_BTF_VERSION"
     
         # ---- 阶段 3：全量编译（vmlinux-btf 会继承上面的环境变量）----
-        if make -j"$(nproc)"; then
-          echo "多线程编译成功"
-        elif make -j1; then
-          echo "单线程编译成功"
-        elif make -j1 V=s; then
-          echo "单线程详细日志编译成功"
-        else
-          echo "编译失败"
-          exit 1
-        fi
-
+        make \
+        VMLINUX_BTF_SRC="$GITHUB_WORKSPACE/vmlinux-btf-blob" \
+        VMLINUX_BTF_VERSION="$KERNEL_VER" \
+        -j"$(nproc)" || \
+        make VMLINUX_BTF_SRC="$GITHUB_WORKSPACE/vmlinux-btf-blob" \
+             VMLINUX_BTF_VERSION="$KERNEL_VER" -j1 V=s
+    
         echo "========================================"
         echo "固件编译完成"
         echo "最终磁盘空间:"
