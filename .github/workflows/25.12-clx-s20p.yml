@@ -644,7 +644,7 @@ jobs:
         [ -z "$BAD" ] || { echo "白名单外残留:"; echo "$BAD"; exit 1; }
         echo "✔ 翻译裁剪完成"
         # =====================================================
-
+        #make defconfig    # 让 .config 重新同步，消除 out of sync
         make download -j8 || make download -j1 V=s
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
@@ -660,21 +660,30 @@ jobs:
         echo "开始编译... ($(nproc) 线程)"
         df -hT /
 
-        # ---- 阶段 1：先编译内核（此时 vmlinux 产出）----
-        make target/linux/compile -j"$(nproc)" \
-          || make target/linux/compile -j1 V=s
+        make defconfig    # 编译前强制同步配置
+
+        # ---- 阶段 1：编译内核，失败时保留完整日志 ----
+        if ! make target/linux/compile -j"$(nproc)" 2>&1 | tee kernel_build.log; then
+          make target/linux/compile -j1 V=s 2>&1 | tee kernel_build.log
+        fi
     
-        # ---- 阶段 2：定位 vmlinux（现在 build_dir 一定存在）----
-        KERNEL_DIR=$(ls -d build_dir/target-*/linux-* 2>/dev/null | head -n1)
-        echo ">>> 内核 build 目录: ${KERNEL_DIR:-<未找到>}"
-        if [ -z "$KERNEL_DIR" ] || [ ! -f "$KERNEL_DIR/vmlinux" ]; then
-          echo "❌ 内核编译后仍未找到 vmlinux"
-          find build_dir -maxdepth 3 -name vmlinux 2>/dev/null | head
+        # ---- 阶段 2：正确地定位 vmlinux（任意深度）----
+        VMLINUX=$(find build_dir/target-*/linux-* -name vmlinux -type f 2>/dev/null | head -n1)
+    
+        if [ -z "$VMLINUX" ]; then
+          echo "❌ vmlinux 确实不存在，内核构建详情："
+          echo "---- 内核 build 目录内容 ----"
+          ls -R build_dir/target-*/linux-* 2>/dev/null | head -100
+          echo "---- kernel_build.log 中的错误 ----"
+          grep -iE "error|fatal|cannot|No such" kernel_build.log | head -50
+          echo "---- 日志尾部 ----"
+          tail -100 kernel_build.log
           exit 1
         fi
-        export VMLINUX_BTF_SRC="$KERNEL_DIR/vmlinux"
-        export VMLINUX_BTF_VERSION="$(basename "$KERNEL_DIR" | sed 's/^linux-//')"
-        echo "✅ BTF blob: $VMLINUX_BTF_SRC  版本: $VMLINUX_BTF_VERSION"
+    
+        export VMLINUX_BTF_SRC="$VMLINUX"
+        export VMLINUX_BTF_VERSION="$(basename "$(dirname "$VMLINUX")" | sed 's/^linux-//')"
+        echo "✅ BTF blob: $VMLINUX_BTF_SRC 版本: $VMLINUX_BTF_VERSION"
     
         # ---- 阶段 3：全量编译（vmlinux-btf 会继承上面的环境变量）----
         if make -j"$(nproc)"; then
